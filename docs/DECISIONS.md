@@ -231,3 +231,16 @@ pool, and Docker's default pools hold about 30 bridge networks; more moving part
 and stop); host firewall rules alone (Atelier would be managing iptables for the
 container-to-container case Docker already handles); the default bridge with daemon-wide
 `icc=false` (changes every other container on the host, and needs a daemon config change).
+
+**Amended 2026-11-07 — every network path a session has, and which are allowed**
+(atelier-4e18c55-F1). The ICC-off bridge closes only the first row. Any new path into or
+out of a session must be added to this table, with the test that holds it:
+
+| Path | Allowed? | Held by | Status |
+|---|---|---|---|
+| session -> another session | no | ICC-off bridge | done, live deny test |
+| session -> the host's own services (gateway IP, anything listening on 0.0.0.0: PostgreSQL, Atelier's own ports, a TCP Docker API) | no | host firewall: drop new connections from the session bridge to the host | spine #2 |
+| session -> other containers' published ports (through the gateway) | no | same host firewall rule | spine #2 |
+| session -> internet and the LAN | yes (package installs, git, data sources, as on Workbench today) | | admins may narrow later |
+| Atelier process -> session | yes (the proxy dials container IPs) | replies to it pass the firewall as established traffic | done |
+| other host accounts -> session | no | host firewall: only Atelier's account may open connections to the session bridge | spine #2 |

@@ -106,8 +106,11 @@ Dependency-ordered. Each item lists what "done" means.
 - [ ] **#2 Identity.** PAM sign-in, account ID and groups from the OS (`getpwnam`,
   `getgrouplist`); OIDC sign-in mapping `preferred_username` to the same lookup.
   *Done:* tests for unknown user, disabled user, wrong password, user without an account
-  ID; user A denied user B's session. Only the Atelier process can reach the session
-  network (host firewall rule, ADR-0015): a test as another host account is refused.
+  ID; user A denied user B's session. Host firewall rules for the session network
+  (ADR-0015 table): only the Atelier process can open connections to sessions, and
+  sessions can't open connections to the host or to other containers' published ports.
+  Live deny tests: from another host account to a session, from a session to a port
+  published on the host, and from a session to a service on the host's 0.0.0.0.
 - [ ] **#3 Schema.** PostgreSQL schema for users, sessions, images, profiles, grants;
   migrations. *Done:* migrations run forward from empty; schema reviewed before anything
   depends on it.
