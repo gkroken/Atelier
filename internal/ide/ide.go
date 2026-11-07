@@ -95,13 +95,17 @@ var (
 	prefixRE = regexp.MustCompile(`^(/[A-Za-z0-9._-]+)+$`)
 )
 
+// ValidName reports whether name is allowed as a user or group name: it ends up in the
+// container's /etc/passwd and /etc/group, in paths, and in environment variables.
+func ValidName(name string) bool { return userRE.MatchString(name) }
+
 // Validate checks every field. Each one ends up in an environment variable that a
 // definition may use in a path, so each must be present and unable to escape.
 func (p Params) Validate() error {
 	if !sessionIDRE.MatchString(p.SessionID) {
 		return fmt.Errorf("session ID %q: want 8-64 lowercase letters or digits", p.SessionID)
 	}
-	if !userRE.MatchString(p.User) {
+	if !ValidName(p.User) {
 		return fmt.Errorf("user name %q not allowed", p.User)
 	}
 	if !path.IsAbs(p.Home) || path.Clean(p.Home) != p.Home || p.Home == "/" {

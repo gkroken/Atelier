@@ -207,6 +207,17 @@ func (b *Backend) ensureNetwork(ctx context.Context) error {
 	return nil
 }
 
+// RemoveNetwork deletes the session network. Docker refuses while containers are still
+// attached. A network that is already gone is not an error. Used to clean up scratch
+// networks in tests; production keeps its network.
+func (b *Backend) RemoveNetwork(ctx context.Context) error {
+	err := b.do(ctx, http.MethodDelete, "/networks/"+url.PathEscape(b.network), nil, "", nil)
+	if err != nil && !errors.Is(err, backend.ErrNotFound) {
+		return fmt.Errorf("remove network %s: %w", b.network, err)
+	}
+	return nil
+}
+
 // checkHome refuses a home that isn't a real directory owned by the session's account:
 // a symlink, a file or socket, a folder owned by someone else (another user's home, /home
 // itself, anything of root's such as /var/run). The launcher fills Home.Source from the
