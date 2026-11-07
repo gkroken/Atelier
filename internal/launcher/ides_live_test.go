@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -130,4 +131,153 @@ func mustParse(t *testing.T, s string) *url.URL {
 		t.Fatal(err)
 	}
 	return u
+}
+
+// wsWriteText sends one masked text frame (clients must mask, RFC 6455 5.3).
+func wsWriteText(t *testing.T, conn net.Conn, msg []byte) {
+	t.Helper()
+	hdr := []byte{0x81}
+	switch n := len(msg); {
+	case n < 126:
+		hdr = append(hdr, 0x80|byte(n))
+	case n < 1<<16:
+		hdr = append(hdr, 0x80|126, byte(n>>8), byte(n))
+	default:
+		t.Fatalf("message too long: %d", n)
+	}
+	mask := make([]byte, 4)
+	rand.Read(mask)
+	hdr = append(hdr, mask...)
+	body := make([]byte, len(msg))
+	for i := range msg {
+		body[i] = msg[i] ^ mask[i%4]
+	}
+	if _, err := conn.Write(append(hdr, body...)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// wsReadText reads frames until a complete text message arrives; control frames are
+// skipped (a ping isn't answered; the test is short).
+func wsReadText(t *testing.T, br *bufio.Reader) []byte {
+	t.Helper()
+	var msg []byte
+	for {
+		h := make([]byte, 2)
+		if _, err := io.ReadFull(br, h); err != nil {
+			t.Fatal(err)
+		}
+		fin, op := h[0]&0x80 != 0, h[0]&0x0f
+		n := uint64(h[1] & 0x7f)
+		switch n {
+		case 126:
+			b := make([]byte, 2)
+			io.ReadFull(br, b)
+			n = uint64(b[0])<<8 | uint64(b[1])
+		case 127:
+			b := make([]byte, 8)
+			io.ReadFull(br, b)
+			n = 0
+			for _, x := range b {
+				n = n<<8 | uint64(x)
+			}
+		}
+		if h[1]&0x80 != 0 {
+			t.Fatal("server frame is masked")
+		}
+		payload := make([]byte, n)
+		if _, err := io.ReadFull(br, payload); err != nil {
+			t.Fatal(err)
+		}
+		if op >= 0x8 {
+			if op == 0x8 {
+				t.Fatalf("server closed the websocket: %q", payload)
+			}
+			continue
+		}
+		msg = append(msg, payload...)
+		if fin {
+			return msg
+		}
+	}
+}
+
+// TestLiveJupyterLabKernelOverWebsocket: JupyterLab loads through /s/<id>/ (prefix kept),
+// a Python kernel starts through its REST API, and a kernel_info_request sent over the
+// kernel's websocket channel gets a kernel_info_reply back: messages both ways over a
+// real IDE's websocket, through the launcher and proxy (atelier-b5a2831-N1).
+//
+//	ATELIER_DOCKER_LIVE=1 scripts/test.sh -run TestLiveJupyterLab ./internal/launcher/
+func TestLiveJupyterLabKernelOverWebsocket(t *testing.T) {
+	front, s, acct := liveSession(t, ide.JupyterLab, "atelier-live-jl-net")
+	c := browser(t, acct.Name)
+	prefix := front + "/s/" + s.ID
+	resp, err := c.Get(prefix + "/lab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(page), "JupyterLab") {
+		t.Fatalf("/lab: %d at %s: %.300s", resp.StatusCode, resp.Request.URL, page)
+	}
+	xsrf := ""
+	for _, ck := range c.Jar.Cookies(resp.Request.URL) {
+		if ck.Name == "_xsrf" {
+			xsrf = ck.Value
+		}
+	}
+	if xsrf == "" {
+		t.Fatal("no _xsrf cookie")
+	}
+	rq, _ := http.NewRequest("POST", prefix+"/api/kernels", strings.NewReader(`{"name":"python3"}`))
+	rq.Header.Set("Content-Type", "application/json")
+	rq.Header.Set("X-XSRFToken", xsrf)
+	resp, err = c.Do(rq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kernel struct{ ID string }
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 201 || json.Unmarshal(body, &kernel) != nil || kernel.ID == "" {
+		t.Fatalf("start kernel: %d %.300s", resp.StatusCode, body)
+	}
+
+	conn, br := wsDial(t, c, front, "/s/"+s.ID+"/api/kernels/"+kernel.ID+"/channels?session_id=atelier-test")
+	req := map[string]any{
+		"header": map[string]any{"msg_id": "atelier-1", "username": acct.Name, "session": "atelier-test",
+			"msg_type": "kernel_info_request", "version": "5.3", "date": time.Now().UTC().Format(time.RFC3339)},
+		"parent_header": map[string]any{}, "metadata": map[string]any{}, "content": map[string]any{},
+		"channel": "shell", "buffers": []any{},
+	}
+	out, _ := json.Marshal(req)
+	start := time.Now()
+	wsWriteText(t, conn, out)
+	for {
+		var m struct {
+			Channel string
+			Header  struct {
+				MsgType string `json:"msg_type"`
+			}
+			ParentHeader struct {
+				MsgID string `json:"msg_id"`
+			} `json:"parent_header"`
+			Content struct {
+				Status   string
+				Language struct{ Name string } `json:"language_info"`
+			}
+		}
+		raw := wsReadText(t, br)
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatalf("not JSON: %.200s", raw)
+		}
+		if m.Header.MsgType == "kernel_info_reply" && m.ParentHeader.MsgID == "atelier-1" {
+			if m.Channel != "shell" || m.Content.Status != "ok" || m.Content.Language.Name != "python" {
+				t.Errorf("reply: %.300s", raw)
+			}
+			t.Logf("kernel_info_reply over the websocket after %v", time.Since(start).Round(time.Millisecond))
+			return
+		}
+	}
 }

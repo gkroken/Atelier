@@ -155,7 +155,8 @@ func TestLiveFileFromSecondSessionSeenInFirst(t *testing.T) {
 		return ide.Definition{
 			Name: name, Title: name, Image: ide.RStudio.Image, Port: 8000,
 			Entrypoint: []string{"python3", "-c"}, Cmd: []string{script},
-			Health: ide.Health{Path: "/", MaxStatus: 399},
+			StripPrefix: true, // the test servers serve from /
+			Health:      ide.Health{Path: "/", MaxStatus: 399},
 		}
 	}
 	first, err := l.Start(ctx, acct, def("watcher", watcherScript))

@@ -7,8 +7,8 @@ stops and escalates.
 
 Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
-**Current status (2026-11-07):** spine #0 done on the dev host (measured below); the
-re-measure on the work server is owed. **NEXT = spine #1** (code-server and JupyterLab).
+**Current status (2026-11-07):** spines #0 and #1 done on the dev host; the re-measure
+on the work server is owed. **NEXT = spine #2** (identity: PAM and OIDC sign-in).
 
 ---
 
@@ -124,10 +124,20 @@ Dependency-ordered. Each item lists what "done" means.
   second writes (0.28 s after the second session was started), which is what RStudio's
   file pane relies on (ADR-0007). Websockets through the proxy are tested against a raw
   upgrade echo (`internal/proxy`); RStudio's own websocket use isn't exercised yet.
-- [~] **#1 Same spike for code-server and JupyterLab.** *Done:* all three IDEs behind the
+- [x] **#1 Same spike for code-server and JupyterLab.** *Done:* all three IDEs behind the
   proxy with no IDE-specific hacks outside one per-IDE definition file (ADR-0008); a live
   test exchanges websocket messages with a real IDE through the launcher and proxy, for
   example JupyterLab's kernel channel (atelier-b5a2831-N1).
+
+  **Done 2026-11-07:** `internal/ide` has `rstudio.go`, `codeserver.go` and `jupyter.go`;
+  nothing in the launcher, proxy, backend or session packages names an IDE. (The proxy's
+  list of client identity headers to strip includes `X-RStudio-Username`, as a deny-list
+  entry, not behaviour.) Live tests through the launcher and proxy on the dev host:
+  RStudio (main page, client_init), code-server (workbench page, an asset under the
+  prefix, websocket 101), and JupyterLab (`/lab`, a Python kernel started over REST, and a
+  `kernel_info_request` answered over the kernel's websocket channel). Healthy after
+  about 1.2 s (RStudio median), 0.5 s (code-server) and 1.1 s (JupyterLab), single runs
+  for the latter two. Not yet checked in a real browser.
 - [ ] **#2 Identity.** PAM sign-in, account ID and groups from the OS (`getpwnam`,
   `getgrouplist`); OIDC sign-in mapping `preferred_username` to the same lookup.
   *Done:* tests for unknown user, disabled user, wrong password, user without an account
@@ -155,7 +165,10 @@ Dependency-ordered. Each item lists what "done" means.
   definition saves the IDE's state before the container stops, and Stop doesn't wait out
   its timeout (today rserver as PID 1 ignores SIGTERM: Stop(10 s) ends in SIGKILL with no
   workspace saved, atelier-10f7686-N1); a live test suspends and resumes RStudio with the
-  workspace intact.
+  workspace intact. Quitting a session removes its per-session data folder in the home
+  (RStudio's `~/.local/share/rstudio/atelier/<id>`, code-server's
+  `~/.local/share/code-server/atelier/<id>`), through a cleanup step in the definition,
+  with a test (atelier-83f3ee9-N1).
 - [ ] **#6 Limits.** Profiles per group, session cap per user, enforced in the launcher.
 - [ ] **#7 Admin dashboard and image management**, including pull-on-publish.
 - [ ] **#8 Smoke script** for the Definition of Done, two users, deny cases.
