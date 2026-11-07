@@ -113,7 +113,14 @@ func TestRefusals(t *testing.T) {
 		{"bad listen port", strings.Replace(minimal, "127.0.0.1:8080", "127.0.0.1:99999", 1), "server.listen: port"},
 		{"uppercase host", strings.Replace(minimal, "mainHost: atelier", "mainHost: Atelier", 1), "server.mainHost: want a lowercase hostname"},
 		{"host with a path", strings.Replace(minimal, "mainHost: atelier.example.org", "mainHost: atelier.example.org/x", 1), "server.mainHost: want a lowercase hostname"},
-		{"same hosts", strings.Replace(minimal, "sessions.atelier", "atelier", 1), "server.sessionsHost: must differ from server.mainHost"},
+		{"same hosts", strings.Replace(minimal, "sessions.atelier", "atelier", 1), "server.sessionsHost: must be a different hostname"},
+		{"same host, other port", strings.Replace(minimal, "sessions.atelier.example.org", "atelier.example.org:8443", 1), "server.sessionsHost: must be a different hostname"},
+		{"same host, :443", strings.Replace(minimal, "sessions.atelier.example.org", "atelier.example.org:443", 1), "server.sessionsHost: must be a different hostname"},
+		{"same host, both with ports", strings.Replace(strings.Replace(minimal, "sessions.atelier.example.org", "atelier.example.org:2", 1), "mainHost: atelier.example.org", "mainHost: atelier.example.org:1", 1), "server.sessionsHost: must be a different hostname"},
+		{"IP as main host", strings.Replace(minimal, "mainHost: atelier.example.org", "mainHost: 10.0.0.1", 1), "server.mainHost: \"10.0.0.1\" is an IP address"},
+		{"IP with port as sessions host", strings.Replace(minimal, "sessions.atelier.example.org", "10.0.0.1:8443", 1), "server.sessionsHost: \"10.0.0.1:8443\" is an IP address"},
+		{"second document", minimal + "---\ndocker:\n  netwrk: typo\n", "more than one YAML document"},
+		{"empty second document", minimal + "---\n", "more than one YAML document"},
 		{"no sign-in", strings.Replace(minimal, "  pam: {}", "  {}", 1), "auth: turn on at least one"},
 		{"http issuer", strings.Replace(oidc, "https://", "http://", 1), "auth.oidc.issuer: want an https URL"},
 		{"bad pam service", strings.Replace(minimal, "pam: {}", "pam: {service: ../x}", 1), "auth.pam.service: want a PAM service name"},
@@ -132,6 +139,15 @@ func TestRefusals(t *testing.T) {
 				t.Errorf("error prints the secret: %q", err)
 			}
 		})
+	}
+}
+
+// Different hostnames with ports are fine, and a leading "---" is still one document.
+func TestAcceptsPortsOnDifferentHostsAndALeadingSeparator(t *testing.T) {
+	doc := "---\n" + strings.Replace(strings.Replace(minimal, "sessions.atelier.example.org", "sessions.localhost:8443", 1),
+		"mainHost: atelier.example.org", "mainHost: localhost:8443", 1)
+	if _, err := Load([]byte(doc), env(nil)); err != nil {
+		t.Fatal(err)
 	}
 }
 

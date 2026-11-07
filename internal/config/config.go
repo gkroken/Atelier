@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"strconv"
 	"strings"
 
+	goyaml "go.yaml.in/yaml/v2"
 	"sigs.k8s.io/yaml"
 )
 
@@ -101,6 +103,9 @@ func LoadFile(path string) (*Config, error) {
 
 // Load parses data, expands placeholders with lookup, applies defaults and validates.
 func Load(data []byte, lookup func(string) (string, bool)) (*Config, error) {
+	if err := oneDocument(data); err != nil {
+		return nil, err
+	}
 	js, err := yaml.YAMLToJSONStrict(data) // refuses duplicate keys
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
@@ -132,6 +137,24 @@ func Load(data []byte, lookup func(string) (string, bool)) (*Config, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// oneDocument refuses a file with a second YAML document after a "---" line: the parser
+// reads only the first, so the rest would be dropped without a word, unknown keys
+// included (atelier-3a70e08-F2).
+func oneDocument(data []byte) error {
+	dec := goyaml.NewDecoder(bytes.NewReader(data))
+	var first, next any
+	if err := dec.Decode(&first); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil // empty; Load says so
+		}
+		return fmt.Errorf("parse: %w", err)
+	}
+	if err := dec.Decode(&next); !errors.Is(err, io.EOF) {
+		return errors.New("the file has more than one YAML document (a '---' line after the start); put everything in one")
+	}
+	return nil
 }
 
 // walker checks the decoded YAML against the Go types, key by key, and expands
@@ -317,6 +340,14 @@ var (
 	networkRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
 )
 
+// hostname drops an optional :port.
+func hostname(hostport string) string {
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		return h
+	}
+	return hostport
+}
+
 func (c *Config) validate() error {
 	var errs []error
 	bad := func(key, format string, args ...any) {
@@ -333,10 +364,14 @@ func (c *Config) validate() error {
 	for _, h := range []struct{ key, v string }{{"server.mainHost", s.MainHost}, {"server.sessionsHost", s.SessionsHost}} {
 		if !hostRE.MatchString(h.v) || len(h.v) > 253 {
 			bad(h.key, "want a lowercase hostname (optionally :port), got %q", h.v)
+		} else if net.ParseIP(hostname(h.v)) != nil {
+			bad(h.key, "%q is an IP address; use a DNS name, so the two hosts get their own certificate and cookies (ADR-0016)", h.v)
 		}
 	}
-	if s.MainHost != "" && s.MainHost == s.SessionsHost {
-		bad("server.sessionsHost", "must differ from server.mainHost, so session content never shares an origin with Atelier's pages (ADR-0016)")
+	// Ports don't separate cookies, and :443 is the same origin as no port behind TLS,
+	// so the hostnames themselves must differ (atelier-3a70e08-F1).
+	if s.MainHost != "" && hostname(s.MainHost) == hostname(s.SessionsHost) {
+		bad("server.sessionsHost", "must be a different hostname from server.mainHost, not just another port, so session content never shares an origin or cookies with Atelier's pages (ADR-0016)")
 	}
 
 	if c.Auth.PAM == nil && c.Auth.OIDC == nil {

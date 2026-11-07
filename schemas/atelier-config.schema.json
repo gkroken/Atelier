@@ -13,8 +13,8 @@
       "required": ["listen", "mainHost", "sessionsHost"],
       "properties": {
         "listen": {"type": "string", "description": "Address the HTTP server binds, host:port."},
-        "mainHost": {"type": "string", "description": "Hostname for sign-in, the home page and the admin pages."},
-        "sessionsHost": {"type": "string", "description": "Hostname for sessions at /s/<id>/; must differ from mainHost (ADR-0016)."}
+        "mainHost": {"type": "string", "description": "Hostname for sign-in, the home page and the admin pages; no IP addresses."},
+        "sessionsHost": {"type": "string", "description": "Hostname for sessions at /s/<id>/; a different hostname from mainHost, not just another port; no IP addresses (ADR-0016)."}
       }
     },
     "auth": {
