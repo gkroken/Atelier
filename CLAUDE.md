@@ -13,6 +13,10 @@ Atelier: self-hosted browser IDE sessions (RStudio, VS Code, JupyterLab) for man
 on one server, replacing Posit Workbench. Go single binary + PostgreSQL + one Docker
 container per session. Sibling projects: forge (packages), Skald (publishing).
 
+The coder and reviewer workflow is in `code_review/` (local, not committed): read
+`code_review/CODER.md` or `REVIEWER.md` at the start of a session, as your role says.
+Committing goes through the `commit-for-review` skill.
+
 **Read first, only what the task needs:**
 
 - `WORKPLAN.md` — Definition of Done, spine, open questions. Status line at the top.
@@ -28,6 +32,7 @@ All checks print one line on success and only failures otherwise; full logs go t
 scripts/check.sh                    # fmt + vet + build + test: the pre-commit gate
 scripts/test.sh [-run X] [./pkg/]   # tests, failures only
 scripts/run-quiet.sh <label> -- <cmd>   # any other noisy command
+scripts/wait-review.sh [sha]        # in the background: verdict + finding headings only
 ```
 
 ## Keeping context small (follow these every session)
@@ -48,8 +53,9 @@ scripts/run-quiet.sh <label> -- <cmd>   # any other noisy command
 - For changes over ~30 lines or spanning multiple files, state the plan and wait for
   confirmation before writing code.
 - Keep `scripts/check.sh` green at all times.
-- **Commit after each self-contained unit of work.** Message format:
-  `<scope>: <what and why>` (e.g. `launcher: stop container on idle timeout`).
+- **Commit after each self-contained unit of work**, through the `commit-for-review`
+  skill. Message format: `<scope>: <what and why>` (e.g. `launcher: stop container on
+  idle timeout`). Never amend or force-push; fix forward, citing finding IDs.
 - **Ask before** changing: authentication, the database schema once it ships, the
   session URL shape, or anything security-sensitive.
 - If `WORKPLAN.md` or an ADR conflicts with what the code does, stop and report it.

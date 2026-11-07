@@ -5,6 +5,10 @@ coverage.out
 # Full check logs written by scripts/*.sh (kept local, grepped on failure)
 /.logs/
 
+# The coder/reviewer handoff files (instructions, reports, ledger): local to the review
+# workflow, never committed.
+/code_review/
+
 # Session handoff notes (handoff skill): local to one machine's sessions
 /handover/session.md
 
