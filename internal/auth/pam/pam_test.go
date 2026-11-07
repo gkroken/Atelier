@@ -215,3 +215,32 @@ func TestClassify(t *testing.T) {
 		t.Errorf("system error in auth: %v", err)
 	}
 }
+
+// Account runs only the account stack: carol (disabled) is refused, alice and an
+// unknown name pass or fail as the account script says, and the auth script (the
+// password check) never runs.
+func TestAccount(t *testing.T) {
+	c, dir := testChecker(t, 2)
+	if err := c.Account(context.Background(), "alice"); err != nil {
+		t.Errorf("alice: %v", err)
+	}
+	for _, u := range []string{"carol", "", "nul\x00x", strings.Repeat("a", maxUser+1)} {
+		if err := c.Account(context.Background(), u); !errors.Is(err, ErrAccount) {
+			t.Errorf("%q: %v, want ErrAccount", u, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "seen-alice")); err == nil {
+		t.Error("Account ran the password check")
+	}
+	// A service whose account stack asks for a password gets nothing and refuses.
+	conf := filepath.Join(dir, "pam.d")
+	os.WriteFile(filepath.Join(conf, "asks"), []byte(strings.ReplaceAll(
+		"account [success=1 default=ignore] pam_exec.so expose_authtok quiet DIR/auth.sh\naccount requisite pam_deny.so\naccount required pam_permit.so\n", "DIR", dir)), 0o600)
+	asks, err := New("asks", conf, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := asks.Account(context.Background(), "alice"); err == nil {
+		t.Error("an account stack asking for a password passed with none")
+	}
+}

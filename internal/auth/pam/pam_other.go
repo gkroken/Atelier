@@ -24,3 +24,7 @@ func New(service, confdir string, concurrent int) (*Checker, error) {
 func (c *Checker) Check(ctx context.Context, user, password string) (string, error) {
 	return "", errors.New("pam: this build has no PAM support (needs Linux and cgo)")
 }
+
+func (c *Checker) Account(ctx context.Context, user string) error {
+	return errors.New("pam: this build has no PAM support (needs Linux and cgo)")
+}

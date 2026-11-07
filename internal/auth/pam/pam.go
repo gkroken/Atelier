@@ -96,6 +96,28 @@ static int atelier_check(const char *service, const char *confdir, atelier_creds
 	return rc;
 }
 
+// atelier_account runs account management only, with no password: for a sign-in
+// another method (OIDC) already authenticated. The conversation has no password to
+// give, so a module that asks for one fails.
+static int atelier_account(const char *service, const char *confdir, atelier_creds *c, int *stage) {
+	struct pam_conv conv = { atelier_conv, c };
+	pam_handle_t *h = NULL;
+	int rc;
+	*stage = 0;
+	if (confdir != NULL) {
+		rc = pam_start_confdir(service, c->user, &conv, confdir, &h);
+	} else {
+		rc = pam_start(service, c->user, &conv, &h);
+	}
+	if (rc != PAM_SUCCESS) {
+		return rc;
+	}
+	*stage = 2;
+	rc = pam_acct_mgmt(h, PAM_SILENT | PAM_DISALLOW_NULL_AUTHTOK);
+	pam_end(h, rc);
+	return rc;
+}
+
 static void atelier_wipe(char *s) {
 	if (s != NULL) {
 		explicit_bzero(s, strlen(s));
@@ -245,6 +267,61 @@ func (c *Checker) check(user, password string) (string, error) {
 		return user, nil
 	}
 	return C.GoString(out), nil
+}
+
+// Account checks only that user's account may sign in now (pam_acct_mgmt): for a
+// person another method, such as OIDC, has authenticated. With pam_sss this refuses
+// accounts SSSD doesn't serve (local ones) and accounts disabled, expired or locked in
+// AD (atelier-7e6f55e-N2). It returns nil, ErrAccount, ErrUnavailable, ErrBusy, ctx's
+// error, or another failure; never ErrAuth.
+func (c *Checker) Account(ctx context.Context, user string) error {
+	if user == "" || len(user) > maxUser || strings.ContainsRune(user, 0) {
+		return ErrAccount
+	}
+	select {
+	case c.slots <- struct{}{}:
+	default:
+		return ErrBusy
+	}
+	done := make(chan error, 1)
+	go func() {
+		defer func() { <-c.slots }()
+		done <- c.account(user)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *Checker) account(user string) error {
+	service := C.CString(c.service)
+	defer C.free(unsafe.Pointer(service))
+	var confdir *C.char
+	if c.confdir != "" {
+		confdir = C.CString(c.confdir)
+		defer C.free(unsafe.Pointer(confdir))
+	}
+	creds := (*C.atelier_creds)(C.calloc(1, C.size_t(unsafe.Sizeof(C.atelier_creds{}))))
+	if creds == nil {
+		return errors.New("pam: out of memory")
+	}
+	creds.user = C.CString(user)
+	creds.password = C.CString("") // nothing to give: a password prompt gets an empty answer
+	defer func() {
+		C.atelier_wipe(creds.password)
+		C.free(unsafe.Pointer(creds.user))
+		C.free(unsafe.Pointer(creds))
+	}()
+	var stage C.int
+	rc := C.atelier_account(service, confdir, creds, &stage)
+	err := classify(int(rc), int(stage))
+	if errors.Is(err, ErrAuth) {
+		return ErrAccount // stage 0 user-unknown: still "may not sign in"
+	}
+	return err
 }
 
 // classify maps a PAM result to an error. stage says where it stopped: 0 starting PAM,
