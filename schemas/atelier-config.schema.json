@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gkroken/Atelier/schemas/atelier-config.schema.json",
+  "title": "atelier.yaml",
+  "description": "Atelier's configuration (ADR-0018). Kept in step with internal/config by a test.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["server", "auth"],
+  "properties": {
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listen", "mainHost", "sessionsHost"],
+      "properties": {
+        "listen": {"type": "string", "description": "Address the HTTP server binds, host:port."},
+        "mainHost": {"type": "string", "description": "Hostname for sign-in, the home page and the admin pages."},
+        "sessionsHost": {"type": "string", "description": "Hostname for sessions at /s/<id>/; must differ from mainHost (ADR-0016)."}
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Turn on at least one of pam and oidc.",
+      "properties": {
+        "pam": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Sign in with host accounts through PAM (ADR-0017).",
+          "properties": {
+            "service": {"type": "string", "default": "atelier", "description": "PAM service, /etc/pam.d/<service>."}
+          }
+        },
+        "oidc": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Sign in through an OpenID Connect provider.",
+          "required": ["issuer", "clientId", "clientSecret"],
+          "properties": {
+            "issuer": {"type": "string", "pattern": "^https://", "description": "The provider's https issuer URL."},
+            "clientId": {"type": "string"},
+            "clientSecret": {"type": "string", "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$", "description": "A ${NAME} placeholder, read from the environment."},
+            "usernameClaim": {"type": "string", "default": "preferred_username", "description": "Claim mapped to a host account."}
+          }
+        }
+      }
+    },
+    "docker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "socket": {"type": "string", "default": "/var/run/docker.sock", "description": "Docker Engine socket."},
+        "network": {"type": "string", "default": "atelier-sessions", "description": "Session network (ADR-0015)."}
+      }
+    }
+  }
+}

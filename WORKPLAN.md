@@ -7,8 +7,8 @@ stops and escalates.
 
 Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
-**Current status (2026-11-07):** spines #0 and #1 done on the dev host; the re-measure
-on the work server is owed. **NEXT = spine #1b** (the config file, ADR-0018), then #2.
+**Current status (2026-11-07):** spines #0, #1 and #1b done on the dev host; the re-measure
+on the work server is owed. **NEXT = spine #2** (sign-in; needs `gcc` and `libpam0g-dev` on the dev host).
 
 ---
 
@@ -138,7 +138,7 @@ Dependency-ordered. Each item lists what "done" means.
   `kernel_info_request` answered over the kernel's websocket channel). Healthy after
   about 1.2 s (RStudio median), 0.5 s (code-server) and 1.1 s (JupyterLab), single runs
   for the latter two. Not yet checked in a real browser.
-- [ ] **#1b Config file** (ADR-0018). `atelier.yaml`: hostnames, listen address, sign-in,
+- [x] **#1b Config file** (ADR-0018). `atelier.yaml`: hostnames, listen address, sign-in,
   Docker; loaded strictly, `${NAME}` secrets from the environment, `-config-check`, a JSON
   schema and a worked example. *Done:* tests for an unknown key, an unset variable, a
   missing required field and a bad value, each refused with a message naming the key;

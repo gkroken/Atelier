@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../schemas/atelier-config.schema.json
+#
+# atelier.yaml: the installation's source of truth (ADR-0018). Keep it in git; a change
+# is a reviewed commit. Check a file without starting anything:
+#
+#   atelier -config-check -config atelier.yaml
+#
+# Unknown keys are errors. Secrets are never written here: ${NAME} is replaced from the
+# environment, and an unset variable is an error.
+
+server:
+  listen: 127.0.0.1:8080
+  # Sign-in, the home page and the admin pages.
+  mainHost: atelier.example.org
+  # Sessions, at /s/<id>/. A different hostname from mainHost (ADR-0016).
+  sessionsHost: sessions.atelier.example.org
+
+auth:
+  # Windows/AD accounts through SSSD (ADR-0017). {} uses the service "atelier".
+  pam:
+    service: atelier
+  # Optional: OpenID Connect. Remove this block to sign in with PAM only.
+  oidc:
+    issuer: https://login.example.org/realms/main
+    clientId: atelier
+    clientSecret: ${ATELIER_OIDC_CLIENT_SECRET}
+    usernameClaim: preferred_username
+
+docker:
+  socket: /var/run/docker.sock
+  network: atelier-sessions

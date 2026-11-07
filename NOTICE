@@ -1,0 +1,13 @@
+Atelier includes the following third-party Go modules, linked into the atelier binary.
+Their licence texts ship in each module (go mod download; see the module cache).
+
+sigs.k8s.io/yaml v1.6.0
+  MIT License, Copyright (c) 2014 Sam Ghods
+  BSD-3-Clause, Copyright (c) 2012 The Go Authors (parts derived from encoding/json)
+
+go.yaml.in/yaml/v2 v2.4.2
+  Apache License 2.0, Copyright 2011-2016 Canonical Ltd. Its NOTICE reads:
+    Copyright 2011-2016 Canonical Ltd.
+    Licensed under the Apache License, Version 2.0.
+  MIT License, Copyright (c) 2006 Kirill Simonov (files ported from libyaml;
+  see LICENSE.libyaml in the module)

@@ -376,6 +376,17 @@ Parsing uses `sigs.k8s.io/yaml` (MIT and BSD-3-Clause), which converts YAML to J
 uses `encoding/json`, so the config structs use plain `json` tags, as forge does
 (user-approved dependency, 2026-11-07).
 
+**Amendment (2026-11-07, spine #1b, atelier-f7461ea-N1):** the full licence set the
+binary links for this: `sigs.k8s.io/yaml` v1.6.0 (MIT; BSD-3-Clause for code from
+`encoding/json`) and its one dependency `go.yaml.in/yaml/v2` v2.4.2 (Apache-2.0 with a
+NOTICE; MIT for the files ported from libyaml). All are permissive; `NOTICE` at the repo
+root lists them, and a new dependency adds its line there. The module also vendors
+copies of goyaml v2/v3, which the binary doesn't link (`go list -deps ./cmd/atelier`).
+As built: `internal/config`, `schemas/atelier-config.schema.json`,
+`deploy/config/atelier.example.yaml`. Two rules beyond the list above: a secret field
+must be a `${NAME}` placeholder in full (a literal secret is refused), and an empty
+variable counts as unset.
+
 **Rejected:** settings in the database edited through the UI (no review, no history);
 environment variables only (no structure for lists like images and grants); TOML or JSON
 (the sibling projects use YAML).

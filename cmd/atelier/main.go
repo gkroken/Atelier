@@ -28,6 +28,7 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -42,6 +43,7 @@ import (
 	"time"
 
 	"github.com/gkroken/Atelier/internal/backend/docker"
+	"github.com/gkroken/Atelier/internal/config"
 	"github.com/gkroken/Atelier/internal/ide"
 	"github.com/gkroken/Atelier/internal/launcher"
 	"github.com/gkroken/Atelier/internal/proxy"
@@ -59,7 +61,30 @@ func run() error {
 	home := flag.String("home", "", "home folder to mount (default: your own)")
 	socket := flag.String("docker", docker.DefaultSocket, "Docker socket")
 	network := flag.String("network", docker.DefaultNetwork, "session network")
+	cfgPath := flag.String("config", "", "atelier.yaml (ADR-0018); replaces -listen, -docker and -network")
+	check := flag.Bool("config-check", false, "check the -config file and exit, starting nothing")
 	flag.Parse()
+
+	if *check {
+		return checkConfig(*cfgPath, os.Stdout)
+	}
+	if *cfgPath != "" {
+		var set []string
+		flag.Visit(func(f *flag.Flag) {
+			if f.Name == "listen" || f.Name == "docker" || f.Name == "network" {
+				set = append(set, "-"+f.Name)
+			}
+		})
+		if len(set) > 0 {
+			return fmt.Errorf("%s: set in the config file when -config is given", strings.Join(set, ", "))
+		}
+		cfg, err := config.LoadFile(*cfgPath)
+		if err != nil {
+			return err
+		}
+		// Spike: only these are used until sign-in (spine #2) and the two hosts exist.
+		*listen, *socket, *network = cfg.Server.Listen, cfg.Docker.Socket, cfg.Docker.Network
+	}
 
 	if err := loopbackOnly(*listen); err != nil {
 		return err
@@ -110,6 +135,19 @@ func run() error {
 			log.Warn("quit session on exit", "session", s.ID, "err", err)
 		}
 	}
+	return nil
+}
+
+// checkConfig is -config-check: load the file strictly, with the environment its
+// placeholders need, and say so. It starts nothing.
+func checkConfig(path string, out io.Writer) error {
+	if path == "" {
+		return errors.New("-config-check needs -config <file>")
+	}
+	if _, err := config.LoadFile(path); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "config ok: %s\n", path)
 	return nil
 }
 
