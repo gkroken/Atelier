@@ -90,7 +90,7 @@ func TestParallelAttemptsStopAtTheLimit(t *testing.T) {
 }
 
 func TestBoundedKeys(t *testing.T) {
-	l, clock := testLimiter(1, time.Hour)
+	l, clock := testLimiter(2, time.Hour) // one attempt each: below the limit, evictable
 	for i := range maxKeys + 10 {
 		*clock = clock.Add(time.Millisecond)
 		l.Try(strconv.Itoa(i))
@@ -99,10 +99,10 @@ func TestBoundedKeys(t *testing.T) {
 		t.Errorf("%d keys, want between %d and %d", n, maxKeys*9/10, maxKeys)
 	}
 	// The newest are kept; the stalest went.
-	if ok, _ := l.Try(strconv.Itoa(maxKeys + 9)); ok {
-		t.Error("newest key forgotten")
+	if n := len(l.tries[strconv.Itoa(maxKeys+9)]); n != 1 {
+		t.Errorf("newest key has %d attempts, want 1", n)
 	}
-	if ok, _ := l.Try("0"); !ok {
+	if _, kept := l.tries["0"]; kept {
 		t.Error("stalest key kept")
 	}
 }
@@ -117,5 +117,57 @@ func TestSprayStaysCheap(t *testing.T) {
 	}
 	if d := time.Since(start); d > 10*time.Second {
 		t.Errorf("%d attempts took %v", 3*maxKeys, d)
+	}
+}
+
+// The reviewer's probe (atelier-18cac6e-F1): a locked name stays locked through a
+// spray of made-up names, and the spray can't fill the map with keys that never go.
+func TestSprayDoesNotUnlockALockedName(t *testing.T) {
+	l, clock := testLimiter(5, 15*time.Minute)
+	for range 5 {
+		l.Try("alice")
+	}
+	if ok, _ := l.Try("alice"); ok {
+		t.Fatal("alice not locked")
+	}
+	for i := range maxKeys + 1 {
+		*clock = clock.Add(time.Microsecond)
+		l.Try("made-up-" + strconv.Itoa(i))
+	}
+	if ok, _ := l.Try("alice"); ok {
+		t.Fatal("alice unlocked by the spray")
+	}
+	// Once alice's window has passed, she may try again.
+	*clock = clock.Add(15 * time.Minute)
+	if ok, _ := l.Try("alice"); !ok {
+		t.Fatal("alice still locked after the window")
+	}
+}
+
+// When every key is at its limit, new keys are refused (fail closed) instead of
+// evicting a locked one, and the refusal doesn't rescan the map on every attempt.
+func TestFullOfLockedKeysFailsClosed(t *testing.T) {
+	l, clock := testLimiter(1, time.Hour)
+	for i := range maxKeys {
+		l.Try(strconv.Itoa(i)) // each is now at its limit of 1
+	}
+	*clock = clock.Add(time.Minute)
+	if ok, wait := l.Try("newcomer"); ok || wait != time.Hour {
+		t.Fatalf("new key with a map full of locked keys: %v %v; want refused", ok, wait)
+	}
+	if ok, _ := l.Try("0"); ok {
+		t.Fatal("a locked key was evicted")
+	}
+	start := time.Now()
+	for i := range 100_000 {
+		l.Try("spray-" + strconv.Itoa(i))
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("100,000 refused new keys took %v: rescanning each time?", d)
+	}
+	// After the window everything has expired, and new keys are welcome again.
+	*clock = clock.Add(time.Hour)
+	if ok, _ := l.Try("newcomer"); !ok {
+		t.Fatal("still refusing new keys after the window")
 	}
 }
