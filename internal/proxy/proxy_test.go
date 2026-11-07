@@ -184,6 +184,8 @@ func TestStripsClientIdentityHeaders(t *testing.T) {
 		"X-Auth-Request-User", "X-Auth-Request-Email", "X-Auth-Request-Access-Token",
 		"X-Forwarded-User", "X-Forwarded-Email", "X-Forwarded-Groups", "X-Forwarded-Preferred-Username",
 		"Forwarded",
+		"X-Real-Ip", "X-Original-Url", "X-Rewrite-Url",
+		"X_Atelier_User", "X_remote_user", "Remote_user",
 	}
 	for _, h := range spoof {
 		req.Header.Set(h, "root")
@@ -216,8 +218,16 @@ func TestAtelierCookieNeitherForwardedNorSettable(t *testing.T) {
 	req, _ := http.NewRequest("GET", front.URL+"/s/"+id+"/", nil)
 	req.Header.Add("Cookie", "atelier_session=secret; ide-cookie=1")
 	req.Header.Add("Cookie", "atelier_session=secret2")
+	_, s := get(t, req)
+	if c := strings.Join(s.Header.Values("Cookie"), " | "); strings.Contains(c, "atelier_session") {
+		t.Errorf("IDE received Cookie %q", c)
+	}
+
+	// An empty first Cookie line must not let the next one through (atelier-fa69e6c-N3).
+	req, _ = http.NewRequest("GET", front.URL+"/s/"+id+"/", nil)
+	req.Header["Cookie"] = []string{"", "atelier_session=secret3", "ide-cookie=1"}
 	resp, s := get(t, req)
-	if c := s.Header.Get("Cookie"); strings.Contains(c, "atelier_session") || !strings.Contains(c, "ide-cookie=1") {
+	if c := strings.Join(s.Header.Values("Cookie"), " | "); strings.Contains(c, "atelier_session") || !strings.Contains(c, "ide-cookie=1") {
 		t.Errorf("IDE received Cookie %q", c)
 	}
 	for _, sc := range resp.Header.Values("Set-Cookie") {
@@ -310,5 +320,38 @@ func TestWebsocketUpgrade(t *testing.T) {
 		if string(buf) != msg {
 			t.Errorf("echo = %q, want %q", buf, msg)
 		}
+	}
+}
+
+// anyResolver accepts every ID and records what it was asked, to show the proxy's own ID
+// check keeps malformed IDs away from the real resolver (atelier-fa69e6c-N2).
+type anyResolver struct {
+	target *url.URL
+	asked  []string
+}
+
+func (a *anyResolver) Resolve(_ *http.Request, id string) (Route, error) {
+	a.asked = append(a.asked, id)
+	return Route{Target: a.target}, nil
+}
+
+func TestMalformedIDsNeverReachTheResolver(t *testing.T) {
+	ide := fakeIDE(t)
+	res := &anyResolver{target: mustURL(t, ide.URL)}
+	front := httptest.NewServer(New(res, Options{Logger: quiet()}))
+	defer front.Close()
+	for _, id := range []string{"..", "x", strings.Repeat("a", 10000), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxy1", "%2e%2e"} {
+		req, _ := http.NewRequest("GET", front.URL+"/s/"+id+"/", nil)
+		if resp, _ := get(t, req); resp.StatusCode != http.StatusNotFound {
+			t.Errorf("/s/%.30s/ = %d, want 404", id, resp.StatusCode)
+		}
+	}
+	if len(res.asked) != 0 {
+		t.Errorf("resolver was asked about %d malformed IDs", len(res.asked))
+	}
+	good := session.NewID()
+	req, _ := http.NewRequest("GET", front.URL+"/s/"+good+"/", nil)
+	if resp, _ := get(t, req); resp.StatusCode != 200 || len(res.asked) != 1 {
+		t.Errorf("valid ID: status %d, resolver asked %v", resp.StatusCode, res.asked)
 	}
 }

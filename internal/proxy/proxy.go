@@ -69,6 +69,8 @@ var identityHeaders = []string{
 	"X-User", "X-Email", "X-Groups",
 	"X-Webauth-User", "X-Webauth-Email",
 	"X-RStudio-Username",
+	// Headers some servers trust for the client address or the original URL.
+	"X-Real-Ip", "X-Original-Url", "X-Rewrite-Url",
 }
 
 // identityPrefixes: any header starting with one of these is removed.
@@ -165,6 +167,13 @@ func (p *Proxy) rewrite(pr *httputil.ProxyRequest) {
 		out.Header.Del(h)
 	}
 	for k := range out.Header {
+		// Any name with "_": CGI/WSGI-style servers read X_Atelier_User and
+		// X-Atelier-User as the same HTTP_X_ATELIER_USER, so an underscore variant could
+		// shadow a header Atelier sets (nginx drops these by default too).
+		if strings.Contains(k, "_") {
+			out.Header.Del(k)
+			continue
+		}
 		for _, pre := range identityPrefixes {
 			// SetXForwarded's own X-Forwarded-For/Host/Proto are kept.
 			if strings.HasPrefix(k, pre) && !(pre == "X-Forwarded-" && setByUs(k)) {
@@ -181,7 +190,9 @@ func setByUs(h string) bool {
 
 // stripCookies removes Atelier's own cookies from the Cookie header, keeping the IDE's.
 func (p *Proxy) stripCookies(r *http.Request) {
-	if len(p.cookies) == 0 || r.Header.Get("Cookie") == "" {
+	// Values, not Get: Get reads only the first Cookie line, and an empty first line
+	// must not let a second one through unfiltered (atelier-fa69e6c-N3).
+	if len(p.cookies) == 0 || len(r.Header.Values("Cookie")) == 0 {
 		return
 	}
 	var keep []string
