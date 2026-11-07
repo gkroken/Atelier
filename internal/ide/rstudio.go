@@ -15,6 +15,13 @@ package ide
 //   - --www-root-path: the proxy strips /s/<id> (StripPrefix), and rserver adds it back to
 //     its redirects and cookie paths. This is Posit's documented way to run behind a
 //     path prefix.
+//   - RSTUDIO_DATA_HOME per session: open-source RStudio is one session per user, so
+//     every rserver on the same home would pick the same
+//     ~/.local/share/rstudio/sessions/active folder (open editors, environment,
+//     suspended workspace) and two rsessions would write it at once
+//     (atelier-10f7686-F1). Each session gets its own data folder, keyed by the session
+//     ID. User settings in ~/.config/rstudio stay shared, as on Workbench. Removing a
+//     session's folder when it is quit belongs to the session lifecycle (spine #4/#5).
 //   - --www-address=0.0.0.0: the proxy reaches the container by its bridge IP.
 //   - Health: rserver answers 302 (to its sign-in or main page) as soon as it is up.
 //     The R session itself (rsession) starts on the first page load, about 2 s later on
@@ -28,6 +35,7 @@ var RStudio = Definition{
 	Cmd: []string{`set -eu
 mkdir -p /tmp/rstudio/db /tmp/rstudio/run
 printf 'provider=sqlite\ndirectory=/tmp/rstudio/db\n' > /tmp/rstudio/database.conf
+export RSTUDIO_DATA_HOME="$ATELIER_HOME/.local/share/rstudio/atelier/$ATELIER_SESSION_ID"
 exec /usr/lib/rstudio-server/bin/rserver \
   --server-daemonize=0 \
   --auth-none=1 \

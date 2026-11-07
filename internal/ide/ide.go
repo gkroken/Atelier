@@ -51,9 +51,12 @@ type Health struct {
 
 // Params are the per-session values a definition's start command may use.
 type Params struct {
-	User   string // the account's name, as in the container's /etc/passwd
-	Home   string // the home folder inside the container
-	Prefix string // the session's URL prefix, "/s/<id>", no trailing slash
+	// SessionID is the session's stable ID. Unlike Prefix, it never changes for the life
+	// of the session, so definitions key per-session state on it.
+	SessionID string
+	User      string // the account's name, as in the container's /etc/passwd
+	Home      string // the home folder inside the container
+	Prefix    string // the session's URL prefix, "/s/<id>", no trailing slash
 }
 
 // SessionEnv returns the full environment for a session: the definition's own entries, then
@@ -65,6 +68,7 @@ func (d Definition) SessionEnv(p Params) []string {
 	return append(env,
 		"USER="+p.User,
 		"HOME="+p.Home,
+		"ATELIER_SESSION_ID="+p.SessionID,
 		"ATELIER_USER="+p.User,
 		"ATELIER_HOME="+p.Home,
 		"ATELIER_PREFIX="+p.Prefix,

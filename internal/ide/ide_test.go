@@ -38,15 +38,16 @@ func TestDefinitionsAreComplete(t *testing.T) {
 }
 
 // The start command is fixed text: per-session values come in only as environment
-// variables, so nothing a user controls (their name, the session ID) is ever spliced
-// into a shell script.
+// variables. Today's definitions are literals, so this holds by construction; the test
+// guards a future definition that builds its command with fmt.Sprintf or similar
+// (atelier-10f7686-N3).
 func TestStartCommandsAreFixed(t *testing.T) {
-	p := Params{User: "x'; rm -rf / #", Home: "/home/x", Prefix: "/s/abc"}
+	p := Params{SessionID: "abcdefghijklmnopqrstuvwxyz", User: "x'; rm -rf / #", Home: "/home/x", Prefix: "/s/abc"}
 	for _, name := range Names() {
 		d, _ := Lookup(name)
 		t.Run(name, func(t *testing.T) {
 			for _, part := range append(append([]string(nil), d.Entrypoint...), d.Cmd...) {
-				for _, v := range []string{p.User, p.Prefix, "/s/"} {
+				for _, v := range []string{p.SessionID, p.User, p.Prefix, "/s/"} {
 					if strings.Contains(part, v) {
 						t.Errorf("start command contains per-session value %q", v)
 					}
@@ -64,13 +65,13 @@ func TestStartCommandsAreFixed(t *testing.T) {
 // (Docker keeps the last value of a repeated key).
 func TestSessionEnvWins(t *testing.T) {
 	d := Definition{Port: 9000, Env: []string{"USER=root", "ATELIER_PREFIX=/"}}
-	env := d.SessionEnv(Params{User: "alice", Home: "/home/alice", Prefix: "/s/abc"})
+	env := d.SessionEnv(Params{SessionID: "sid", User: "alice", Home: "/home/alice", Prefix: "/s/abc"})
 	last := map[string]string{}
 	for _, kv := range env {
 		k, v, _ := strings.Cut(kv, "=")
 		last[k] = v
 	}
-	want := map[string]string{"USER": "alice", "HOME": "/home/alice", "ATELIER_USER": "alice",
+	want := map[string]string{"ATELIER_SESSION_ID": "sid", "USER": "alice", "HOME": "/home/alice", "ATELIER_USER": "alice",
 		"ATELIER_HOME": "/home/alice", "ATELIER_PREFIX": "/s/abc", "ATELIER_PORT": "9000"}
 	for k, v := range want {
 		if last[k] != v {

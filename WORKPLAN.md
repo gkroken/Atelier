@@ -115,7 +115,11 @@ Dependency-ordered. Each item lists what "done" means.
   migrations. *Done:* migrations run forward from empty; schema reviewed before anything
   depends on it.
 - [ ] **#4 Home page and New Session dialog.**
-- [ ] **#5 Suspend and resume**, idle detection per IDE.
+- [ ] **#5 Suspend and resume**, idle detection per IDE. *Done:* a suspend hook in each
+  definition saves the IDE's state before the container stops, and Stop doesn't wait out
+  its timeout (today rserver as PID 1 ignores SIGTERM: Stop(10 s) ends in SIGKILL with no
+  workspace saved, atelier-10f7686-N1); a live test suspends and resumes RStudio with the
+  workspace intact.
 - [ ] **#6 Limits.** Profiles per group, session cap per user, enforced in the launcher.
 - [ ] **#7 Admin dashboard and image management**, including pull-on-publish.
 - [ ] **#8 Smoke script** for the Definition of Done, two users, deny cases.
