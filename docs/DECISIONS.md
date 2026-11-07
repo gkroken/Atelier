@@ -201,3 +201,33 @@ dialog. Built from rocker / python-slim bases like Skald's.
 
 **Rejected:** picking R and Python separately (many more images); users bring their own
 image (hard to support).
+
+---
+
+## ADR-0015 — Sessions share one bridge network with container-to-container traffic off
+
+**Date:** 2026-11-07 · **Status:** accepted
+
+IDEs run with their own login off (`--auth-none` and the like); the proxy's ownership
+check is the only gate. On Docker's default bridge, any session can open any other
+session's port directly, so user A's terminal could reach user B's IDE without going
+through the proxy (atelier-4ceb450-F3). The Atelier binary runs on the host (ADR-0002) and
+reaches containers by their bridge IP, so the host must keep that access.
+
+**Decision:** every session container joins one user-defined bridge network,
+`atelier-sessions`, created with `com.docker.network.bridge.enable_icc=false`. The Docker
+backend creates it if missing and refuses to start sessions on an existing network with
+that name that is not an ICC-off bridge. No session ports are published on the host. A
+live deny test checks that one session cannot connect to another while the host can.
+Raw-socket tricks that get around ICC need CAP_NET_RAW, which sessions don't have (all
+capabilities are dropped).
+
+**Not covered yet:** other accounts with a shell on the host can still reach container
+IPs directly. Closing that (a host firewall rule letting only the Atelier process reach
+the session network) is part of spine #2.
+
+**Rejected:** one network per session (isolates too, but every network takes an address
+pool, and Docker's default pools hold about 30 bridge networks; more moving parts on every start
+and stop); host firewall rules alone (Atelier would be managing iptables for the
+container-to-container case Docker already handles); the default bridge with daemon-wide
+`icc=false` (changes every other container on the host, and needs a daemon config change).

@@ -63,8 +63,11 @@ func newFake(t *testing.T) (*fakeDaemon, *Backend) {
 	})}
 	go srv.Serve(ln)
 	t.Cleanup(func() { srv.Close() })
-	return f, New(sock)
+	return f, New(sock, "atelier-test-net")
 }
+
+// isolatedNet answers the network lookup with an ICC-off bridge.
+const isolatedNet = `{"Driver":"bridge","Options":{"com.docker.network.bridge.enable_icc":"false"}}`
 
 func (f *fakeDaemon) on(key string, status int, resp string) {
 	f.mu.Lock()
@@ -109,6 +112,7 @@ func spec(t *testing.T) backend.Spec {
 func TestCreateSendsOnlyTheHomeMountAndNoPrivileges(t *testing.T) {
 	f, b := newFake(t)
 	f.on("GET /images/rocker/rstudio:4.5/json", 200, `{"Id":"sha256:img"}`)
+	f.on("GET /networks/atelier-test-net", 200, isolatedNet)
 	f.on("POST /containers/create?name=atelier-test", 201, `{"Id":"c0ffee"}`)
 	f.on("PUT /containers/c0ffee/archive?path=%2F", 200, ``)
 
@@ -137,7 +141,10 @@ func TestCreateSendsOnlyTheHomeMountAndNoPrivileges(t *testing.T) {
 	// GroupAdd, PortBindings, Runtime, ...) fails here until this test is updated on purpose.
 	assertKeys(t, "body", got, "Image", "Entrypoint", "Cmd", "Env", "User", "WorkingDir", "Labels", "HostConfig")
 	hc := got["HostConfig"].(map[string]any)
-	assertKeys(t, "HostConfig", hc, "Mounts", "Privileged", "CapDrop", "SecurityOpt", "PublishAllPorts")
+	assertKeys(t, "HostConfig", hc, "Mounts", "Privileged", "CapDrop", "SecurityOpt", "PublishAllPorts", "NetworkMode")
+	if hc["NetworkMode"] != "atelier-test-net" {
+		t.Errorf("NetworkMode = %v, want the session network", hc["NetworkMode"])
+	}
 	if hc["Privileged"] != false || hc["PublishAllPorts"] != false {
 		t.Errorf("Privileged=%v PublishAllPorts=%v", hc["Privileged"], hc["PublishAllPorts"])
 	}
@@ -264,6 +271,7 @@ func TestCreateRefusesInvalidSpecBeforeTouchingDocker(t *testing.T) {
 func TestCreateRemovesContainerWhenCopyFails(t *testing.T) {
 	f, b := newFake(t)
 	f.on("GET /images/rocker/rstudio:4.5/json", 200, `{}`)
+	f.on("GET /networks/atelier-test-net", 200, isolatedNet)
 	f.on("POST /containers/create?name=atelier-test", 201, `{"Id":"c0ffee"}`)
 	f.on("PUT /containers/c0ffee/archive?path=%2F", 500, `{"message":"disk full"}`)
 	f.on("DELETE /containers/c0ffee?force=1&v=1", 204, ``)
@@ -273,6 +281,69 @@ func TestCreateRemovesContainerWhenCopyFails(t *testing.T) {
 	calls := f.callList()
 	if calls[len(calls)-1] != "DELETE /containers/c0ffee?force=1&v=1" {
 		t.Errorf("last call = %s, want the remove", calls[len(calls)-1])
+	}
+}
+
+func TestCreateMakesTheSessionNetworkWithICCOff(t *testing.T) {
+	f, b := newFake(t)
+	f.on("GET /images/rocker/rstudio:4.5/json", 200, `{}`)
+	created := false
+	f.mu.Lock()
+	f.handlers["GET /networks/atelier-test-net"] = func(w http.ResponseWriter, _ []byte) {
+		if !created {
+			w.WriteHeader(404)
+			io.WriteString(w, `{"message":"network atelier-test-net not found"}`)
+			return
+		}
+		io.WriteString(w, isolatedNet)
+	}
+	f.handlers["POST /networks/create"] = func(w http.ResponseWriter, _ []byte) {
+		created = true
+		w.WriteHeader(201)
+		io.WriteString(w, `{"Id":"n1"}`)
+	}
+	f.mu.Unlock()
+	f.on("POST /containers/create?name=atelier-test", 201, `{"Id":"c0ffee"}`)
+	f.on("PUT /containers/c0ffee/archive?path=%2F", 200, ``)
+
+	if _, err := b.Create(context.Background(), spec(t)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	var body struct {
+		Name    string
+		Driver  string
+		Options map[string]string
+	}
+	if err := json.Unmarshal(f.bodies["POST /networks/create"], &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Name != "atelier-test-net" || body.Driver != "bridge" || body.Options[iccOption] != "false" {
+		t.Errorf("network create = %+v", body)
+	}
+}
+
+// A network that already exists but lets containers talk to each other is refused, and
+// no container is created on it.
+func TestCreateRefusesANetworkThatIsNotIsolated(t *testing.T) {
+	for name, resp := range map[string]string{
+		"icc on":      `{"Driver":"bridge","Options":{"com.docker.network.bridge.enable_icc":"true"}}`,
+		"icc default": `{"Driver":"bridge","Options":{}}`,
+		"not bridge":  `{"Driver":"overlay","Options":{"com.docker.network.bridge.enable_icc":"false"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, b := newFake(t)
+			f.on("GET /images/rocker/rstudio:4.5/json", 200, `{}`)
+			f.on("GET /networks/atelier-test-net", 200, resp)
+			_, err := b.Create(context.Background(), spec(t))
+			if !errors.Is(err, ErrNetworkNotIsolated) {
+				t.Fatalf("err = %v, want ErrNetworkNotIsolated", err)
+			}
+			for _, c := range f.callList() {
+				if strings.HasPrefix(c, "POST /containers/create") || strings.HasPrefix(c, "POST /networks/create") {
+					t.Errorf("unexpected call %s", c)
+				}
+			}
+		})
 	}
 }
 

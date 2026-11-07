@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,24 +22,15 @@ import (
 // It runs the container as the test's own account ID, with a scratch home under a temp
 // dir, and checks from the outside what the container saw.
 func TestLive(t *testing.T) {
-	if os.Getenv("ATELIER_DOCKER_LIVE") != "1" {
-		t.Skip("set ATELIER_DOCKER_LIVE=1 to run against the local Docker daemon")
-	}
+	image := liveImage(t)
 	uid, gid := os.Getuid(), os.Getgid()
-	if uid == 0 {
-		t.Skip("run as a non-root user: sessions never run as root")
-	}
-	image := os.Getenv("ATELIER_LIVE_IMAGE")
-	if image == "" {
-		image = "rocker/rstudio:4.5"
-	}
 	home := t.TempDir()
 	if err := os.Chmod(home, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	passwd := fmt.Sprintf("tester:x:%d:%d::/home/tester:/bin/sh\n", uid, gid)
 
-	b := New(DefaultSocket)
+	b := liveBackend(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -115,5 +107,110 @@ func TestLive(t *testing.T) {
 	}
 	if got := read("out.homemounts"); got != "1" {
 		t.Errorf("home mounted %s times, want 1", got)
+	}
+}
+
+const liveNet = "atelier-live-test-net"
+
+// liveImage skips unless live tests were asked for, and returns the image to use.
+func liveImage(t *testing.T) string {
+	t.Helper()
+	if os.Getenv("ATELIER_DOCKER_LIVE") != "1" {
+		t.Skip("set ATELIER_DOCKER_LIVE=1 to run against the local Docker daemon")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("run as a non-root user: sessions never run as root")
+	}
+	if image := os.Getenv("ATELIER_LIVE_IMAGE"); image != "" {
+		return image
+	}
+	return "rocker/rstudio:4.5"
+}
+
+// liveBackend returns a Backend on a scratch session network, removed after the test.
+func liveBackend(t *testing.T) *Backend {
+	t.Helper()
+	b := New(DefaultSocket, liveNet)
+	t.Cleanup(func() {
+		// Best effort: another live test may still have containers on it.
+		_ = b.do(context.Background(), "DELETE", "/networks/"+liveNet, nil, "", nil)
+	})
+	return b
+}
+
+// TestLiveSessionsCannotReachEachOther starts two sessions on the session network: B
+// serves HTTP, A tries to connect to it. The host reaching B is the control that shows B
+// was listening, so A's failure is the network refusing, not B being down.
+func TestLiveSessionsCannotReachEachOther(t *testing.T) {
+	image := liveImage(t)
+	b := liveBackend(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	run := func(name string, env []string, script string) (string, string) {
+		t.Helper()
+		home := t.TempDir()
+		id, err := b.Create(ctx, backend.Spec{
+			Image:      image,
+			Entrypoint: []string{"/bin/bash", "-c"},
+			Cmd:        []string{script},
+			Env:        env,
+			UID:        os.Getuid(),
+			GID:        os.Getgid(),
+			Home:       backend.Mount{Source: home, Target: "/home/" + name},
+			Labels:     map[string]string{"atelier.test": "live"},
+		})
+		if err != nil {
+			t.Fatalf("Create %s: %v", name, err)
+		}
+		t.Cleanup(func() { _ = b.Remove(context.Background(), id) })
+		if err := b.Start(ctx, id); err != nil {
+			t.Fatalf("Start %s: %v", name, err)
+		}
+		return id, home
+	}
+
+	bid, _ := run("bob", nil, "exec python3 -m http.server 8787")
+	st, err := b.Inspect(ctx, bid)
+	if err != nil || st.IP == "" {
+		t.Fatalf("Inspect bob: %+v %v", st, err)
+	}
+	target := net.JoinHostPort(st.IP, "8787")
+	// Control: the host (where the proxy runs) reaches bob.
+	var hostErr error
+	for i := 0; i < 100; i++ {
+		var c net.Conn
+		if c, hostErr = net.DialTimeout("tcp", target, time.Second); hostErr == nil {
+			c.Close()
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if hostErr != nil {
+		t.Fatalf("host can't reach bob at %s, so the test proves nothing: %v", target, hostErr)
+	}
+
+	aid, ahome := run("alice", []string{"TARGET_IP=" + st.IP},
+		`if timeout 3 bash -c 'echo > /dev/tcp/$TARGET_IP/8787'; then echo reached; else echo blocked; fi > out`)
+	for {
+		ast, err := b.Inspect(ctx, aid)
+		if err != nil {
+			t.Fatalf("Inspect alice: %v", err)
+		}
+		if !ast.Running {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("alice still running")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	out, err := os.ReadFile(filepath.Join(ahome, "out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "blocked" {
+		t.Errorf("alice's session connecting to bob's %s: %s, want blocked", target, got)
 	}
 }

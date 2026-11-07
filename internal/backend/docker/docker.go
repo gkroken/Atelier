@@ -29,15 +29,29 @@ const APIVersion = "v1.44"
 // DefaultSocket is where the Docker daemon listens on a standard Linux install.
 const DefaultSocket = "/var/run/docker.sock"
 
+// DefaultNetwork is the bridge network every session container joins (ADR-0015).
+const DefaultNetwork = "atelier-sessions"
+
+// iccOption is the bridge driver option that, set to "false", drops traffic between
+// containers on the same bridge. The host can still reach every container, which is how
+// the proxy dials them.
+const iccOption = "com.docker.network.bridge.enable_icc"
+
+// ErrNetworkNotIsolated: the session network exists but lets containers reach each
+// other. Atelier refuses to start sessions on it rather than change it.
+var ErrNetworkNotIsolated = errors.New("session network does not isolate containers")
+
 // Backend talks to one Docker daemon.
 type Backend struct {
-	client *http.Client
+	client  *http.Client
+	network string
 }
 
 var _ backend.Backend = (*Backend)(nil)
 
-// New returns a Backend that dials the daemon at socketPath.
-func New(socketPath string) *Backend {
+// New returns a Backend that dials the daemon at socketPath and puts every session on the
+// bridge network named network (DefaultNetwork in production), creating it on first use.
+func New(socketPath, network string) *Backend {
 	tr := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
@@ -46,7 +60,7 @@ func New(socketPath string) *Backend {
 		MaxIdleConns:    4,
 		IdleConnTimeout: 30 * time.Second,
 	}
-	return &Backend{client: &http.Client{Transport: tr}}
+	return &Backend{client: &http.Client{Transport: tr}, network: network}
 }
 
 // createBody is the subset of POST /containers/create that Atelier sets. Fields left out
@@ -72,6 +86,9 @@ type hostConfig struct {
 	// PublishAllPorts false and no PortBindings: the session port is reachable only on
 	// the container network, never on a host interface.
 	PublishAllPorts bool `json:"PublishAllPorts"`
+	// NetworkMode is always the isolated session network, never the default bridge
+	// (where containers reach each other) or "host".
+	NetworkMode string `json:"NetworkMode"`
 }
 
 type mount struct {
@@ -107,6 +124,12 @@ func (b *Backend) Create(ctx context.Context, spec backend.Spec) (string, error)
 		return "", fmt.Errorf("create container: inspect image %s: %w", spec.Image, err)
 	}
 
+	// Checked on every create, not cached: a network deleted and re-made without
+	// isolation must not be used. It is one small local request.
+	if err := b.ensureNetwork(ctx); err != nil {
+		return "", fmt.Errorf("create container: %w", err)
+	}
+
 	body := createBody{
 		Image:      spec.Image,
 		Entrypoint: spec.Entrypoint,
@@ -124,6 +147,7 @@ func (b *Backend) Create(ctx context.Context, spec backend.Spec) (string, error)
 			}},
 			CapDrop:     []string{"ALL"},
 			SecurityOpt: []string{"no-new-privileges"},
+			NetworkMode: b.network,
 		},
 	}
 	q := ""
@@ -144,6 +168,43 @@ func (b *Backend) Create(ctx context.Context, spec backend.Spec) (string, error)
 		}
 	}
 	return created.ID, nil
+}
+
+type networkInfo struct {
+	Driver  string            `json:"Driver"`
+	Options map[string]string `json:"Options"`
+}
+
+// ensureNetwork makes sure the session network exists with inter-container traffic off,
+// creating it if it is missing. An existing network that isn't an ICC-off bridge is
+// refused, not modified: someone made it on purpose, and Docker can't change the option
+// on a live network anyway.
+func (b *Backend) ensureNetwork(ctx context.Context) error {
+	path := "/networks/" + url.PathEscape(b.network)
+	var info networkInfo
+	err := b.do(ctx, http.MethodGet, path, nil, "", &info)
+	if errors.Is(err, backend.ErrNotFound) {
+		body := map[string]any{
+			"Name":    b.network,
+			"Driver":  "bridge",
+			"Options": map[string]string{iccOption: "false"},
+			"Labels":  map[string]string{"atelier.network": "sessions"},
+		}
+		cerr := b.do(ctx, http.MethodPost, "/networks/create", body, "", nil)
+		var ae *apiError
+		if cerr != nil && !(errors.As(cerr, &ae) && ae.Status == http.StatusConflict) {
+			return fmt.Errorf("create network %s: %w", b.network, cerr)
+		}
+		// Created now, or by a concurrent create (409): read back what is really there.
+		err = b.do(ctx, http.MethodGet, path, nil, "", &info)
+	}
+	if err != nil {
+		return fmt.Errorf("inspect network %s: %w", b.network, err)
+	}
+	if info.Driver != "bridge" || info.Options[iccOption] != "false" {
+		return fmt.Errorf("%w: %s (driver %q, %s=%q)", ErrNetworkNotIsolated, b.network, info.Driver, iccOption, info.Options[iccOption])
+	}
+	return nil
 }
 
 // checkHome refuses a home that isn't a real directory owned by the session's account:

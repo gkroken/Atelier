@@ -99,13 +99,15 @@ Dependency-ordered. Each item lists what "done" means.
 - [ ] **#0 Startup spike.** Go launcher starts an RStudio container as a given account ID
   with that user's home bind-mounted; reverse proxy at `/s/<id>/`, websockets included.
   *Done:* click-to-IDE time measured (20 starts, median and p95) and recorded here; a file
-  written in a second container appears in the first.
+  written in a second container appears in the first; sessions join the ICC-off session
+  network (ADR-0015) and a live test shows one session can't connect to another.
 - [ ] **#1 Same spike for code-server and JupyterLab.** *Done:* all three IDEs behind the
   proxy with no IDE-specific hacks outside one per-IDE definition file (ADR-0008).
 - [ ] **#2 Identity.** PAM sign-in, account ID and groups from the OS (`getpwnam`,
   `getgrouplist`); OIDC sign-in mapping `preferred_username` to the same lookup.
   *Done:* tests for unknown user, disabled user, wrong password, user without an account
-  ID; user A denied user B's session.
+  ID; user A denied user B's session. Only the Atelier process can reach the session
+  network (host firewall rule, ADR-0015): a test as another host account is refused.
 - [ ] **#3 Schema.** PostgreSQL schema for users, sessions, images, profiles, grants;
   migrations. *Done:* migrations run forward from empty; schema reviewed before anything
   depends on it.
