@@ -11,21 +11,20 @@
 package ratelimit
 
 import (
-	"slices"
 	"sync"
 	"time"
 )
 
-// maxKeys bounds memory. Past it, keys that aren't at their limit are dropped, the
-// stalest tenth at once, so a spray of made-up names costs a sort per 10,000 new keys,
-// not a scan per attempt (atelier-2eead6a-N1). A key at its limit is never dropped:
-// that would hand a locked name a fresh set of guesses (atelier-18cac6e-F1). If every
-// key is at its limit, new keys are refused until room frees up (fail closed): during
-// a huge spray, brand-new names wait, but no locked name loses its lock.
+// maxKeys bounds memory: at most maxKeys keys of at most max timestamps each. Only
+// keys whose attempts have all left the window are ever dropped. Dropping a key with
+// any attempt still inside its window would reset its count and hand it fresh guesses
+// (atelier-18cac6e-F1, at or below its limit alike). So when the map is full of live
+// keys, new keys are refused until room frees up (fail closed): during a spray of
+// 100,000+ names brand-new names wait up to a window, but no name's count is ever lost.
 const maxKeys = 100_000
 
 // prunePause is how long after a prune that freed nothing the next one waits, so a
-// spray against a full map doesn't scan it on every attempt.
+// spray against a full map doesn't scan it on every attempt (atelier-2eead6a-N1).
 const prunePause = time.Second
 
 // Limiter allows at most max attempts per key within window.
@@ -97,29 +96,11 @@ func (l *Limiter) recent(key string, now time.Time) []time.Time {
 	return t
 }
 
-// prune drops keys with no recent attempt, then, if still at least 90% full, the
-// stalest keys below their limit, down to 90%. It reports whether there is room for a
-// new key. Called with l.mu held.
+// prune drops keys with no attempt inside the window, and reports whether there is
+// room for a new key. Called with l.mu held.
 func (l *Limiter) prune(now time.Time) bool {
 	for k := range l.tries {
 		l.recent(k, now)
-	}
-	target := maxKeys * 9 / 10
-	if len(l.tries) > target {
-		type entry struct {
-			key  string
-			last time.Time
-		}
-		var open []entry // keys below their limit: dropping one loses nothing that protects
-		for k, t := range l.tries {
-			if len(t) < l.max {
-				open = append(open, entry{k, t[len(t)-1]})
-			}
-		}
-		slices.SortFunc(open, func(a, b entry) int { return a.last.Compare(b.last) })
-		for _, e := range open[:min(len(open), len(l.tries)-target)] {
-			delete(l.tries, e.key)
-		}
 	}
 	if len(l.tries) >= maxKeys {
 		l.noPrune = now.Add(prunePause)

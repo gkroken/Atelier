@@ -89,21 +89,47 @@ func TestParallelAttemptsStopAtTheLimit(t *testing.T) {
 	}
 }
 
+// Memory stays bounded: past maxKeys live keys, newcomers are refused, and once the
+// window has passed the expired keys go and newcomers are welcome again.
 func TestBoundedKeys(t *testing.T) {
-	l, clock := testLimiter(2, time.Hour) // one attempt each: below the limit, evictable
+	l, clock := testLimiter(2, time.Hour) // one attempt each: below the limit, still kept
 	for i := range maxKeys + 10 {
 		*clock = clock.Add(time.Millisecond)
 		l.Try(strconv.Itoa(i))
 	}
-	if n := len(l.tries); n > maxKeys || n < maxKeys*9/10 {
-		t.Errorf("%d keys, want between %d and %d", n, maxKeys*9/10, maxKeys)
+	if n := len(l.tries); n != maxKeys {
+		t.Errorf("%d keys, want %d", n, maxKeys)
 	}
-	// The newest are kept; the stalest went.
-	if n := len(l.tries[strconv.Itoa(maxKeys+9)]); n != 1 {
-		t.Errorf("newest key has %d attempts, want 1", n)
+	if _, kept := l.tries["0"]; !kept {
+		t.Error("a live key below its limit was dropped")
 	}
-	if _, kept := l.tries["0"]; kept {
-		t.Error("stalest key kept")
+	*clock = clock.Add(time.Hour)
+	if ok, _ := l.Try("newcomer"); !ok {
+		t.Fatal("newcomer refused after every key expired")
+	}
+	if n := len(l.tries); n != 1 {
+		t.Errorf("%d keys after the prune, want 1", n)
+	}
+}
+
+// The reviewer's second probe (atelier-18cac6e-F1, below the limit): stopping one
+// short of the limit before each spray gets no extra guesses.
+func TestSprayBelowTheLimitGetsNoFreshGuesses(t *testing.T) {
+	l, clock := testLimiter(5, 15*time.Minute)
+	reached := 0
+	for round := range 3 {
+		for range 4 {
+			if ok, _ := l.Try("alice"); ok {
+				reached++
+			}
+		}
+		for i := range maxKeys + 1 {
+			*clock = clock.Add(time.Microsecond)
+			l.Try("made-up-" + strconv.Itoa(round) + "-" + strconv.Itoa(i))
+		}
+	}
+	if reached > 5 {
+		t.Fatalf("%d passwords for alice reached PAM in one window, want at most 5", reached)
 	}
 }
 
