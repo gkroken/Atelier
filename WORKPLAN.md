@@ -143,7 +143,7 @@ Dependency-ordered. Each item lists what "done" means.
   schema and a worked example. *Done:* tests for an unknown key, an unset variable, a
   missing required field and a bad value, each refused with a message naming the key;
   the example passes `-config-check`; the schema and the Go structs can't drift (a test).
-- [~] **#2 Identity.** (2a PAM check + account lookup done; 2b sign-in, TLS, 2c OIDC, 2d firewall next.) PAM sign-in through `pam_sss` as the `atelier` account (ADR-0017), account ID and groups from the OS (`getpwnam`,
+- [~] **#2 Identity.** (2a PAM check + account lookup done; TLS done; 2b sign-in, 2c OIDC, 2d firewall next.) PAM sign-in through `pam_sss` as the `atelier` account (ADR-0017), account ID and groups from the OS (`getpwnam`,
   `getgrouplist`); OIDC sign-in mapping `preferred_username` to the same lookup.
   *Done:* tests for unknown user, disabled user, wrong password, user without an account
   ID; user A denied user B's session. Host firewall rules for the session network

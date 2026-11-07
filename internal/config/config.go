@@ -47,6 +47,15 @@ type Server struct {
 	MainHost string `json:"mainHost" config:"required"`
 	// SessionsHost serves /s/<id>/; it must differ from MainHost.
 	SessionsHost string `json:"sessionsHost" config:"required"`
+	// TLS, when set, serves https with this certificate and key.
+	TLS *TLS `json:"tls,omitempty"`
+}
+
+// TLS names the certificate and key files, PEM. The certificate covers both hosts; it
+// is reloaded when the files change (internal/tlscert).
+type TLS struct {
+	CertFile string `json:"certFile" config:"required"`
+	KeyFile  string `json:"keyFile" config:"required"`
 }
 
 // Auth is how people sign in. At least one method is on.
@@ -372,6 +381,14 @@ func (c *Config) validate() error {
 	// so the hostnames themselves must differ (atelier-3a70e08-F1).
 	if s.MainHost != "" && hostname(s.MainHost) == hostname(s.SessionsHost) {
 		bad("server.sessionsHost", "must be a different hostname from server.mainHost, not just another port, so session content never shares an origin or cookies with Atelier's pages (ADR-0016)")
+	}
+
+	if t := s.TLS; t != nil {
+		for _, f := range []struct{ key, v string }{{"server.tls.certFile", t.CertFile}, {"server.tls.keyFile", t.KeyFile}} {
+			if !filepath.IsAbs(f.v) || filepath.Clean(f.v) != f.v {
+				bad(f.key, "want an absolute, clean path, got %q", f.v)
+			}
+		}
 	}
 
 	if c.Auth.PAM == nil && c.Auth.OIDC == nil {

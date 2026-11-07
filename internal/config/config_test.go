@@ -124,6 +124,9 @@ func TestRefusals(t *testing.T) {
 		{"no sign-in", strings.Replace(minimal, "  pam: {}", "  {}", 1), "auth: turn on at least one"},
 		{"http issuer", strings.Replace(oidc, "https://", "http://", 1), "auth.oidc.issuer: want an https URL"},
 		{"bad pam service", strings.Replace(minimal, "pam: {}", "pam: {service: ../x}", 1), "auth.pam.service: want a PAM service name"},
+		{"tls without key", strings.Replace(minimal, "auth:", "  tls: {certFile: /etc/c.pem}\nauth:", 1), "server.tls.keyFile: required"},
+		{"relative tls cert", strings.Replace(minimal, "auth:", "  tls: {certFile: c.pem, keyFile: /etc/k.pem}\nauth:", 1), "server.tls.certFile: want an absolute"},
+		{"empty tls", strings.Replace(minimal, "auth:", "  tls:\nauth:", 1), "server.tls: empty"},
 		{"relative socket", minimal + "docker:\n  socket: docker.sock\n", "docker.socket: want an absolute"},
 		{"bad network", minimal + "docker:\n  network: -x\n", "docker.network: want a Docker network name"},
 	} {

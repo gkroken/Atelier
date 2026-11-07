@@ -14,7 +14,17 @@
       "properties": {
         "listen": {"type": "string", "description": "Address the HTTP server binds, host:port."},
         "mainHost": {"type": "string", "description": "Hostname for sign-in, the home page and the admin pages; no IP addresses."},
-        "sessionsHost": {"type": "string", "description": "Hostname for sessions at /s/<id>/; a different hostname from mainHost, not just another port; no IP addresses (ADR-0016)."}
+        "sessionsHost": {"type": "string", "description": "Hostname for sessions at /s/<id>/; a different hostname from mainHost, not just another port; no IP addresses (ADR-0016)."},
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Serve https with this certificate (covering both hosts) and key, PEM; reloaded when the files change.",
+          "required": ["certFile", "keyFile"],
+          "properties": {
+            "certFile": {"type": "string", "description": "Absolute path to the certificate chain."},
+            "keyFile": {"type": "string", "description": "Absolute path to the private key; not readable by other accounts."}
+          }
+        }
       }
     },
     "auth": {

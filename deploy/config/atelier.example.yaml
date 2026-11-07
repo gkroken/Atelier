@@ -14,6 +14,11 @@ server:
   mainHost: atelier.example.org
   # Sessions, at /s/<id>/. A different hostname from mainHost (ADR-0016).
   sessionsHost: sessions.atelier.example.org
+  # https, with one certificate for both hosts. Reloaded when the files change (a
+  # renewal needs no restart). The key must not be readable by other accounts.
+  tls:
+    certFile: /etc/atelier/tls/fullchain.pem
+    keyFile: /etc/atelier/tls/privkey.pem
 
 auth:
   # Windows/AD accounts through SSSD (ADR-0017). {} uses the service "atelier".

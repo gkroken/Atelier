@@ -47,6 +47,7 @@ import (
 	"github.com/gkroken/Atelier/internal/ide"
 	"github.com/gkroken/Atelier/internal/launcher"
 	"github.com/gkroken/Atelier/internal/proxy"
+	"github.com/gkroken/Atelier/internal/tlscert"
 )
 
 func main() {
@@ -68,6 +69,7 @@ func run() error {
 	if *check {
 		return checkConfig(*cfgPath, os.Stdout)
 	}
+	var tlsFiles *config.TLS
 	if *cfgPath != "" {
 		var set []string
 		flag.Visit(func(f *flag.Flag) {
@@ -84,6 +86,7 @@ func run() error {
 		}
 		// Spike: only these are used until sign-in (spine #2) and the two hosts exist.
 		*listen, *socket, *network = cfg.Server.Listen, cfg.Docker.Socket, cfg.Docker.Network
+		tlsFiles = cfg.Server.TLS
 	}
 
 	if err := loopbackOnly(*listen); err != nil {
@@ -94,6 +97,12 @@ func run() error {
 		return err
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	var certs *tlscert.Source
+	if tlsFiles != nil {
+		if certs, err = tlscert.New(tlsFiles.CertFile, tlsFiles.KeyFile, log); err != nil {
+			return err
+		}
+	}
 
 	be := docker.New(*socket, *network)
 	// Spike only: there is one user, the account running atelier, and only loopback can
@@ -116,12 +125,24 @@ func run() error {
 		// No WriteTimeout: IDE long-polls and websockets stay open.
 	}
 	fmt.Printf("atelier spike: sessions run as %s (uid %d) with %s mounted.\n", acct.Name, acct.UID, acct.Home)
-	fmt.Printf("Open http://127.0.0.1:%s/?token=%s\n", port, token)
+	// With TLS, localhost: a development certificate names it more often than 127.0.0.1.
+	open := "http://127.0.0.1:" + port
+	if certs != nil {
+		srv.TLSConfig = certs.Config()
+		open = "https://localhost:" + port
+	}
+	fmt.Printf("Open %s/?token=%s\n", open, token)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errc := make(chan error, 1)
-	go func() { errc <- srv.Serve(ln) }()
+	go func() {
+		if certs != nil {
+			errc <- srv.ServeTLS(ln, "", "") // the certificate comes from TLSConfig
+			return
+		}
+		errc <- srv.Serve(ln)
+	}()
 	select {
 	case err := <-errc:
 		return err
@@ -209,7 +230,7 @@ func guard(next http.Handler, token, port string) http.Handler {
 			}
 			http.SetCookie(w, &http.Cookie{
 				Name: cookieName, Value: token, Path: "/",
-				HttpOnly: true, SameSite: http.SameSiteStrictMode,
+				HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil,
 			})
 			q.Del("token")
 			u := *r.URL

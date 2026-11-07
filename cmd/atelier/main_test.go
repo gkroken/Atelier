@@ -223,3 +223,18 @@ func TestTokenCookieNeverReachesTheIDE(t *testing.T) {
 		t.Errorf("IDE received Cookie %q", gotCookies[0])
 	}
 }
+
+// Over https the token cookie is Secure, so a browser never sends it over plain http.
+func TestTokenCookieIsSecureOverTLS(t *testing.T) {
+	h, _ := testHandler(t)
+	for _, tc := range []struct {
+		target string
+		secure bool
+	}{{"https://localhost:18080/?token=" + testToken, true}, {"/?token=" + testToken, false}} {
+		w := do(h, "GET", tc.target, "localhost:18080", nil)
+		c := w.Result().Cookies()
+		if w.Code != http.StatusSeeOther || len(c) != 1 || c[0].Secure != tc.secure {
+			t.Errorf("%s: %d, cookies %+v; want Secure=%v", tc.target, w.Code, c, tc.secure)
+		}
+	}
+}
