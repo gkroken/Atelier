@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -80,15 +82,22 @@ func (f *fakeDaemon) callList() []string {
 	return append([]string(nil), f.calls...)
 }
 
-func spec() backend.Spec {
+// spec returns a valid Spec whose home is a fresh folder owned by the test's own account,
+// so the host-side home check passes.
+func spec(t *testing.T) backend.Spec {
+	t.Helper()
+	if os.Getuid() == 0 {
+		t.Skip("run as a non-root user: a root-owned home is refused")
+	}
 	return backend.Spec{
-		Name:  "atelier-test",
-		Image: "rocker/rstudio:4.5",
-		Cmd:   []string{"rserver"},
-		Env:   []string{"USER=alice"},
-		UID:   4321,
-		GID:   4322,
-		Home:  backend.Mount{Source: "/home/alice", Target: "/home/alice"},
+		Name:       "atelier-test",
+		Image:      "rocker/rstudio:4.5",
+		Entrypoint: []string{"/bin/sh", "-c"},
+		Cmd:        []string{"rserver"},
+		Env:        []string{"USER=alice"},
+		UID:        os.Getuid(),
+		GID:        os.Getgid(),
+		Home:       backend.Mount{Source: t.TempDir(), Target: "/home/alice"},
 		Files: []backend.File{
 			{Path: "/etc/passwd", Mode: 0o644, Content: []byte("alice:x:4321:4322::/home/alice:/bin/sh\n")},
 			{Path: "/etc/group", Mode: 0o644, Content: []byte("alice:x:4322:\n")},
@@ -103,7 +112,8 @@ func TestCreateSendsOnlyTheHomeMountAndNoPrivileges(t *testing.T) {
 	f.on("POST /containers/create?name=atelier-test", 201, `{"Id":"c0ffee"}`)
 	f.on("PUT /containers/c0ffee/archive?path=%2F", 200, ``)
 
-	id, err := b.Create(context.Background(), spec())
+	sp := spec(t)
+	id, err := b.Create(context.Background(), sp)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -117,18 +127,17 @@ func TestCreateSendsOnlyTheHomeMountAndNoPrivileges(t *testing.T) {
 	if err := json.Unmarshal(f.bodies["POST /containers/create?name=atelier-test"], &got); err != nil {
 		t.Fatal(err)
 	}
-	if got["User"] != "4321:4322" {
-		t.Errorf("User = %v, want 4321:4322", got["User"])
+	if want := fmt.Sprintf("%d:%d", sp.UID, sp.GID); got["User"] != want {
+		t.Errorf("User = %v, want %s", got["User"], want)
 	}
 	if got["WorkingDir"] != "/home/alice" {
 		t.Errorf("WorkingDir = %v", got["WorkingDir"])
 	}
+	// Exact key sets, not a denylist: any field added to the request (Binds, Tmpfs,
+	// GroupAdd, PortBindings, Runtime, ...) fails here until this test is updated on purpose.
+	assertKeys(t, "body", got, "Image", "Entrypoint", "Cmd", "Env", "User", "WorkingDir", "Labels", "HostConfig")
 	hc := got["HostConfig"].(map[string]any)
-	for _, k := range []string{"Binds", "PortBindings", "VolumesFrom", "Devices", "CapAdd", "NetworkMode", "PidMode", "IpcMode", "UsernsMode"} {
-		if _, ok := hc[k]; ok {
-			t.Errorf("HostConfig.%s is set: %v", k, hc[k])
-		}
-	}
+	assertKeys(t, "HostConfig", hc, "Mounts", "Privileged", "CapDrop", "SecurityOpt", "PublishAllPorts")
 	if hc["Privileged"] != false || hc["PublishAllPorts"] != false {
 		t.Errorf("Privileged=%v PublishAllPorts=%v", hc["Privileged"], hc["PublishAllPorts"])
 	}
@@ -143,8 +152,14 @@ func TestCreateSendsOnlyTheHomeMountAndNoPrivileges(t *testing.T) {
 		t.Fatalf("Mounts = %v, want exactly the home", hc["Mounts"])
 	}
 	m := mounts[0].(map[string]any)
-	if m["Type"] != "bind" || m["Source"] != "/home/alice" || m["Target"] != "/home/alice" || m["ReadOnly"] != false {
+	assertKeys(t, "mount", m, "Type", "Source", "Target", "ReadOnly", "BindOptions")
+	if m["Type"] != "bind" || m["Source"] != sp.Home.Source || m["Target"] != "/home/alice" || m["ReadOnly"] != false {
 		t.Errorf("mount = %v", m)
+	}
+	bo := m["BindOptions"].(map[string]any)
+	assertKeys(t, "BindOptions", bo, "Propagation")
+	if bo["Propagation"] != "rprivate" {
+		t.Errorf("Propagation = %v, want rprivate", bo["Propagation"])
 	}
 
 	// The files went in as a tar of root-owned regular files at the given paths.
@@ -168,9 +183,61 @@ func TestCreateSendsOnlyTheHomeMountAndNoPrivileges(t *testing.T) {
 	}
 }
 
+func assertKeys(t *testing.T, what string, m map[string]any, want ...string) {
+	t.Helper()
+	got := make([]string, 0, len(m))
+	for k := range m {
+		got = append(got, k)
+	}
+	sort.Strings(got)
+	sort.Strings(want)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("%s keys = %v, want exactly %v", what, got, want)
+	}
+}
+
+// The home must be a real directory owned by the session's UID. Each case is refused
+// before Docker is called.
+func TestCreateRefusesHomeNotOwnedByTheUser(t *testing.T) {
+	base := spec(t)
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(t.TempDir(), link); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]func(*backend.Spec){
+		"root-owned folder":  func(s *backend.Spec) { s.Home.Source = "/etc" },
+		"docker socket dir":  func(s *backend.Spec) { s.Home.Source = "/var/run" },
+		"another uid":        func(s *backend.Spec) { s.UID++ },
+		"symlink to own dir": func(s *backend.Spec) { s.Home.Source = link },
+		"regular file":       func(s *backend.Spec) { s.Home.Source = file },
+		"missing":            func(s *backend.Spec) { s.Home.Source = filepath.Join(dir, "nope") },
+		"docker socket":      func(s *backend.Spec) { s.Home.Source = DefaultSocket },
+		"/home itself":       func(s *backend.Spec) { s.Home.Source = "/home" },
+	}
+	for name, mod := range cases {
+		t.Run(name, func(t *testing.T) {
+			f, b := newFake(t)
+			s := base
+			mod(&s)
+			_, err := b.Create(context.Background(), s)
+			if !errors.Is(err, backend.ErrInvalidSpec) {
+				t.Fatalf("err = %v, want ErrInvalidSpec", err)
+			}
+			if calls := f.callList(); len(calls) != 0 {
+				t.Errorf("Docker was called: %v", calls)
+			}
+		})
+	}
+}
+
 func TestCreateRefusesMissingImageWithoutPulling(t *testing.T) {
 	f, b := newFake(t) // no handlers: the image lookup 404s
-	_, err := b.Create(context.Background(), spec())
+	_, err := b.Create(context.Background(), spec(t))
 	if !errors.Is(err, backend.ErrImageNotPresent) {
 		t.Fatalf("err = %v, want ErrImageNotPresent", err)
 	}
@@ -183,7 +250,7 @@ func TestCreateRefusesMissingImageWithoutPulling(t *testing.T) {
 
 func TestCreateRefusesInvalidSpecBeforeTouchingDocker(t *testing.T) {
 	f, b := newFake(t)
-	s := spec()
+	s := spec(t)
 	s.UID = 0
 	_, err := b.Create(context.Background(), s)
 	if !errors.Is(err, backend.ErrInvalidSpec) {
@@ -200,7 +267,7 @@ func TestCreateRemovesContainerWhenCopyFails(t *testing.T) {
 	f.on("POST /containers/create?name=atelier-test", 201, `{"Id":"c0ffee"}`)
 	f.on("PUT /containers/c0ffee/archive?path=%2F", 500, `{"message":"disk full"}`)
 	f.on("DELETE /containers/c0ffee?force=1&v=1", 204, ``)
-	if _, err := b.Create(context.Background(), spec()); err == nil || !strings.Contains(err.Error(), "disk full") {
+	if _, err := b.Create(context.Background(), spec(t)); err == nil || !strings.Contains(err.Error(), "disk full") {
 		t.Fatalf("err = %v, want the copy error", err)
 	}
 	calls := f.callList()

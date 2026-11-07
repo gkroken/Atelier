@@ -17,12 +17,13 @@ func validSpec() Spec {
 
 func TestValidateAccepts(t *testing.T) {
 	for name, mod := range map[string]func(*Spec){
-		"plain":         func(*Spec) {},
-		"digest image":  func(s *Spec) { s.Image = "ghcr.io/x/rstudio@sha256:abc123" },
-		"named":         func(s *Spec) { s.Name = "atelier-k3j9" },
-		"no files":      func(s *Spec) { s.Files = nil },
-		"other target":  func(s *Spec) { s.Home.Target = "/home/rstudio" },
-		"nfs home path": func(s *Spec) { s.Home.Source = "/mnt/nfs/home/alice" },
+		"plain":            func(*Spec) {},
+		"digest image":     func(s *Spec) { s.Image = "ghcr.io/x/rstudio@sha256:abc123" },
+		"named":            func(s *Spec) { s.Name = "atelier-k3j9" },
+		"no files":         func(s *Spec) { s.Files = nil },
+		"other target":     func(s *Spec) { s.Home.Target = "/home/rstudio" },
+		"nfs home path":    func(s *Spec) { s.Home.Source = "/mnt/nfs/home/alice" },
+		"file beside home": func(s *Spec) { s.Files[0].Path = "/home/alice2/x" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := validSpec()
@@ -55,6 +56,8 @@ func TestValidateDenies(t *testing.T) {
 		"unclean target":          func(s *Spec) { s.Home.Target = "/home/./alice" },
 		"relative file":           func(s *Spec) { s.Files[0].Path = "etc/passwd" },
 		"unclean file":            func(s *Spec) { s.Files[0].Path = "/etc/../root/x" },
+		"file in home":            func(s *Spec) { s.Files[0].Path = "/home/alice/.Rprofile" },
+		"file is home":            func(s *Spec) { s.Files[0].Path = "/home/alice" },
 		"setuid file":             func(s *Spec) { s.Files[0].Mode = 0o4755 },
 		"bad container name":      func(s *Spec) { s.Name = "-x" },
 		"slash container name":    func(s *Spec) { s.Name = "a/b" },

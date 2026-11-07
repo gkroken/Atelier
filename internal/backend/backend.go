@@ -43,11 +43,14 @@ type Spec struct {
 	Env []string
 	// UID and GID are the owner's real account IDs from the OS. Never 0.
 	UID, GID int
-	// Home is the owner's home folder: the only bind mount the container gets.
+	// Home is the owner's home folder: the only bind mount the container gets. Validate
+	// checks only its shape; a backend that mounts host paths must also check, on the
+	// host, that Source is a real directory owned by UID (the Docker backend does).
 	Home Mount
 	// Files are written into the container's filesystem after it is created and before
 	// it starts (for example a passwd file naming only the owner). They are copies, not
-	// mounts.
+	// mounts, and may not be under Home.Target: they would land in the real home
+	// folder as root.
 	Files []File
 	// Labels are attached to the container, for finding Atelier's containers again.
 	Labels map[string]string
@@ -127,6 +130,9 @@ func Validate(spec Spec) error {
 	for _, f := range spec.Files {
 		if err := absClean(f.Path, path.IsAbs, path.Clean); err != nil || f.Path == "/" {
 			return bad("file path %q", f.Path)
+		}
+		if f.Path == spec.Home.Target || strings.HasPrefix(f.Path, spec.Home.Target+"/") {
+			return bad("file %s is inside the home folder %s", f.Path, spec.Home.Target)
 		}
 		if f.Mode&^0o777 != 0 {
 			return bad("file %s: mode %o has more than permission bits", f.Path, f.Mode)

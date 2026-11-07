@@ -14,8 +14,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/gkroken/Atelier/internal/backend"
@@ -91,6 +93,9 @@ func (b *Backend) Create(ctx context.Context, spec backend.Spec) (string, error)
 	if err := backend.Validate(spec); err != nil {
 		return "", err
 	}
+	if err := checkHome(spec); err != nil {
+		return "", err
+	}
 	// The Engine API never pulls on create (only the CLI does), but check explicitly so
 	// the error says what is wrong and so a future API change cannot pull behind our back.
 	// The image reference goes into the path unescaped, as the Docker CLI sends it: the
@@ -139,6 +144,35 @@ func (b *Backend) Create(ctx context.Context, spec backend.Spec) (string, error)
 		}
 	}
 	return created.ID, nil
+}
+
+// checkHome refuses a home that isn't a real directory owned by the session's account:
+// a symlink, a file or socket, a folder owned by someone else (another user's home, /home
+// itself, anything of root's such as /var/run). The launcher fills Home.Source from the
+// OS account database, and this is the last point that sees the real host path.
+//
+// The last component is checked with Lstat; parents may be symlinks (/home -> /mnt/home
+// is common). The owner can't swap the folder between this check and the mount, because
+// that needs write access to its parent, and homes live in root-owned folders.
+func checkHome(spec backend.Spec) error {
+	bad := func(format string, a ...any) error {
+		return fmt.Errorf("%w: home %s: %s", backend.ErrInvalidSpec, spec.Home.Source, fmt.Sprintf(format, a...))
+	}
+	fi, err := os.Lstat(spec.Home.Source)
+	if err != nil {
+		return bad("%v", err)
+	}
+	if !fi.IsDir() {
+		return bad("not a directory (%s)", fi.Mode().Type())
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return bad("no owner information")
+	}
+	if int(st.Uid) != spec.UID {
+		return bad("owned by UID %d, not the session's UID %d", st.Uid, spec.UID)
+	}
+	return nil
 }
 
 // copyFiles writes files into a created container with PUT /containers/{id}/archive.
