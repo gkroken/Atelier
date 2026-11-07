@@ -7,8 +7,8 @@ stops and escalates.
 
 Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
-**Current status (2026-11-07):** planning done, no code yet. **NEXT = spine #0** (startup
-spike).
+**Current status (2026-11-07):** spine #0 done on the dev host (measured below); the
+re-measure on the work server is owed. **NEXT = spine #1** (code-server and JupyterLab).
 
 ---
 
@@ -96,11 +96,34 @@ States
 
 Dependency-ordered. Each item lists what "done" means.
 
-- [ ] **#0 Startup spike.** Go launcher starts an RStudio container as a given account ID
+- [x] **#0 Startup spike.** Go launcher starts an RStudio container as a given account ID
   with that user's home bind-mounted; reverse proxy at `/s/<id>/`, websockets included.
   *Done:* click-to-IDE time measured (20 starts, median and p95) and recorded here; a file
   written in a second container appears in the first; sessions join the ICC-off session
   network (ADR-0015) and a live test shows one session can't connect to another.
+
+  **Measured 2026-11-07** (`ATELIER_DOCKER_LIVE=1 ATELIER_BENCH=20 scripts/test.sh -run
+  TestLiveStartupBench ./internal/launcher/`): 20 RStudio starts in a row from
+  `rocker/rstudio:4.5` already on the host (RStudio 2026.04.0, R 4.5.3), each timed from
+  the call to Start (the click), through the proxy, one scratch home for all 20:
+
+  | Until | Median | p95 | Max |
+  |---|---|---|---|
+  | rserver passes its health check | 1.24 s | 1.99 s | 2.53 s |
+  | main page loaded through `/s/<id>/` | 1.25 s | 1.99 s | 2.54 s |
+  | R session up (client_init returned): the IDE is usable | **3.06 s** | **4.58 s** | 5.83 s |
+
+  Not included: the browser parsing and rendering RStudio's JavaScript. Host: the
+  developer's WSL2 machine (AMD Ryzen 9 7950X3D, 32 threads, 30 GB, kernel
+  6.18.54.1-microsoft-standard-WSL2, Docker 29.9.3, overlayfs, cgroup v2), mostly idle
+  (load 0.6). **Owed:** the same 20 starts on the work server, and a check in a real
+  browser (`code_review/user-checks/startup-on-work-server.md`).
+
+  Shared home: `TestLiveFileFromSecondSessionSeenInFirst` starts two sessions for one
+  account through the launcher; an inotify watch on the home in the first sees a file the
+  second writes (0.28 s after the second session was started), which is what RStudio's
+  file pane relies on (ADR-0007). Websockets through the proxy are tested against a raw
+  upgrade echo (`internal/proxy`); RStudio's own websocket use isn't exercised yet.
 - [ ] **#1 Same spike for code-server and JupyterLab.** *Done:* all three IDEs behind the
   proxy with no IDE-specific hacks outside one per-IDE definition file (ADR-0008).
 - [ ] **#2 Identity.** PAM sign-in, account ID and groups from the OS (`getpwnam`,

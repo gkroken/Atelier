@@ -94,48 +94,12 @@ func TestLiveRStudioThroughTheProxy(t *testing.T) {
 	t.Cleanup(func() { _ = l.Quit(context.Background(), acct.Name, s.ID) })
 	healthy := time.Since(start)
 
-	c := browser(t, acct.Name)
-	resp, err := c.Get(front.URL + "/s/" + s.ID + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	page, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	final := resp.Request.URL
-	if resp.StatusCode != 200 || !strings.HasPrefix(final.Path, "/s/"+s.ID+"/") || final.Host != strings.TrimPrefix(front.URL, "http://") {
-		t.Fatalf("main page: %d at %s (want 200 under /s/%s/ on the proxy's host): %.200s", resp.StatusCode, final, s.ID, page)
-	}
-	pageLoaded := time.Since(start)
-
-	// client_init, with RStudio's CSRF token from the cookie it set under /s/<id>.
-	base, _ := url.Parse(front.URL + "/s/" + s.ID + "/")
-	csrf := ""
-	for _, ck := range c.Jar.Cookies(base) {
-		if ck.Name == "rs-csrf-token" {
-			csrf = ck.Value
-		}
-	}
-	if csrf == "" {
-		t.Fatalf("no rs-csrf-token cookie under %s", base.Path)
-	}
-	rq, _ := http.NewRequest("POST", front.URL+"/s/"+s.ID+"/rpc/client_init",
-		strings.NewReader(`{"method":"client_init","params":[],"clientId":"x","clientVersion":""}`))
-	rq.Header.Set("Content-Type", "application/json")
-	rq.Header.Set("X-RS-CSRF-Token", csrf)
-	resp, err = c.Do(rq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != 200 || !strings.HasPrefix(string(out), `{"result"`) {
-		t.Fatalf("client_init: %d %.200s", resp.StatusCode, out)
-	}
+	pageLoaded, rUp := openRStudio(t, front.URL, s.ID, acct.Name, start)
 	t.Logf("healthy %v, main page %v, R session up %v after Start was called",
-		healthy.Round(time.Millisecond), pageLoaded.Round(time.Millisecond), time.Since(start).Round(time.Millisecond))
+		healthy.Round(time.Millisecond), pageLoaded.Round(time.Millisecond), rUp.Round(time.Millisecond))
 
 	// Another user: the same 404 as for nothing at all.
-	resp, err = browser(t, "someone-else").Get(front.URL + "/s/" + s.ID + "/")
+	resp, err := browser(t, "someone-else").Get(front.URL + "/s/" + s.ID + "/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,4 +120,50 @@ func TestLiveRStudioThroughTheProxy(t *testing.T) {
 func removeNetwork(name string) {
 	c := docker.New(docker.DefaultSocket, name)
 	_ = c.RemoveNetwork(context.Background())
+}
+
+// openRStudio does what a browser's first visit to a session does, through the proxy at
+// frontURL: follow the redirects to RStudio's main page, then the client_init RPC, which
+// starts the R session. It returns the time from start to the main page and to the R
+// session being up.
+func openRStudio(t *testing.T, frontURL, id, user string, start time.Time) (page, rsession time.Duration) {
+	t.Helper()
+	c := browser(t, user)
+	resp, err := c.Get(frontURL + "/s/" + id + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	final := resp.Request.URL
+	if resp.StatusCode != 200 || !strings.HasPrefix(final.Path, "/s/"+id+"/") || final.Host != strings.TrimPrefix(frontURL, "http://") {
+		t.Fatalf("main page: %d at %s (want 200 under /s/%s/ on the proxy's host): %.200s", resp.StatusCode, final, id, body)
+	}
+	page = time.Since(start)
+
+	// client_init, with RStudio's CSRF token from the cookie it set under /s/<id>.
+	base, _ := url.Parse(frontURL + "/s/" + id + "/")
+	csrf := ""
+	for _, ck := range c.Jar.Cookies(base) {
+		if ck.Name == "rs-csrf-token" {
+			csrf = ck.Value
+		}
+	}
+	if csrf == "" {
+		t.Fatalf("no rs-csrf-token cookie under %s", base.Path)
+	}
+	rq, _ := http.NewRequest("POST", frontURL+"/s/"+id+"/rpc/client_init",
+		strings.NewReader(`{"method":"client_init","params":[],"clientId":"x","clientVersion":""}`))
+	rq.Header.Set("Content-Type", "application/json")
+	rq.Header.Set("X-RS-CSRF-Token", csrf)
+	resp, err = c.Do(rq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.HasPrefix(string(out), `{"result"`) {
+		t.Fatalf("client_init: %d %.200s", resp.StatusCode, out)
+	}
+	return page, time.Since(start)
 }
