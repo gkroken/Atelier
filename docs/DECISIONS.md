@@ -286,3 +286,28 @@ needs a wildcard) come back up, as JupyterHub requires for sharing.
 **Rejected:** one origin for everything, as Workbench does (session content gets the
 user's Atelier rights, including admin rights); per-session subdomains now (a wildcard
 DNS name and certificate for a protection v1 doesn't need).
+
+**Amended 2026-11-07 — separate hosts are not enough on their own** (atelier-572d510-F1,
+N1). The text above overstates it. A sessions host that is a subdomain of the same
+registrable domain (`sessions.atelier.example.org` next to `atelier.example.org`) is the
+**same site** to browsers. A script or form on the sessions host can then send a POST to
+the main host, and the browser attaches the main host's cookie even with SameSite=Strict.
+CORS only stops the script reading the answer; the write still happens. So the split
+stops session content *reading* Atelier's pages and API, but stopping *writes* needs this
+as well:
+
+- **Every state-changing endpoint on the main host refuses requests not from its own
+  origin.** That means `Sec-Fetch-Site: same-origin`, or an `Origin` equal to the main
+  host's when the header is absent, *and* a CSRF token that a session can't plant: one
+  bound to the server-side session, not a double-submit cookie. JavaScript on the sessions
+  host can set cookies for the parent domain (cookie tossing), and `__Host-` protects
+  only cookies with that prefix. Any cookie the main host trusts must be `__Host-`.
+- **Deny test, in the spine item that adds the first main-host endpoint (spine #2):** a
+  POST carrying a valid main-host cookie and `Origin: https://<sessions host>` (or
+  `Sec-Fetch-Site: same-site`) is refused.
+- **Choice of domain, for the user:** a sessions host on a *different registrable domain*
+  (for example `atelier-sessions.example.net`) is cross-site, so SameSite cookies also
+  stop these writes, and cookie tossing between the two is impossible. It costs a second
+  domain name. A subdomain is simpler to get from IT but relies on the CSRF check alone.
+  Either way the check above is required. JupyterHub's guidance prefers a separate
+  domain for the same reason.

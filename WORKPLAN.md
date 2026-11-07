@@ -111,6 +111,9 @@ Dependency-ordered. Each item lists what "done" means.
   sessions can't open connections to the host or to other containers' published ports.
   Live deny tests: from another host account to a session, from a session to a port
   published on the host, and from a session to a service on the host's 0.0.0.0.
+  Main-host endpoints refuse cross-origin writes (ADR-0016 amendment): a POST with a
+  valid cookie and `Origin: https://<sessions host>` or `Sec-Fetch-Site: same-site` is
+  refused, with a test.
 - [ ] **#3 Schema.** PostgreSQL schema for users, sessions, images, profiles, grants;
   migrations. *Done:* migrations run forward from empty; schema reviewed before anything
   depends on it.
@@ -138,8 +141,10 @@ background jobs; any forge or Skald integration.
 - [ ] TLS: does Atelier handle it itself, or sit behind an existing reverse proxy? (If
   behind one, the proxy needs a trusted-front-proxy setting for X-Forwarded-Proto,
   atelier-fa69e6c-N4.)
-- [ ] Confirm ADR-0016 (proposed): sessions on their own hostname, e.g.
-  `sessions.atelier.example.org/s/<id>/`, separate from Atelier's own pages.
+- [ ] Confirm ADR-0016 (proposed): sessions on their own hostname, separate from
+  Atelier's own pages, and choose a subdomain (`sessions.atelier.example.org`, relies on
+  the CSRF check alone) or a separate domain (`atelier-sessions.example.net`, also
+  cross-site for SameSite).
 - [ ] Who builds session images, and where: plain Dockerfiles in this repo, or Skald's
   build sandbox?
 - [ ] Migration: move users over one at a time, or switch everyone on a set day?
