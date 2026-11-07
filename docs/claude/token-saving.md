@@ -12,7 +12,7 @@ repo does about each point is in the right-hand column.
 | **Move workflow detail into skills** | Only a skill's name and description load until it's used | `run-checks`, `handoff`, `adr` skills |
 | **Path-scoped rules** | `.claude/rules/*.md` with `paths:` frontmatter load only when matching files are touched | `.claude/rules/go.md` |
 | **Delegate searches and verbose work to subagents on a small model** | The noisy output stays in the subagent; only its summary comes back | `scout` agent (Haiku, read-only, ≤15 bullets) |
-| **Handoff file, then `/clear`** | A fresh session reading 40 lines beats a long session re-reading history on every request | `handoff` skill → `handover/session.md` |
+| **Handoff file, then `/clear`** | A fresh session reading 40 lines beats a long session re-reading history on every request | `handoff` skill → `code_review/HANDOFF.md` |
 | **Custom compact instructions** | `/compact` keeps what you name instead of a generic summary | `# Compact instructions` section in `CLAUDE.md` |
 | **Specific prompts, plan mode for big changes** | Vague asks trigger broad scanning; plan mode avoids rework | Working conventions in `CLAUDE.md` |
 | **Prefer CLIs over MCP servers; disable unused servers** | CLIs add no per-tool listing | — (habit) |

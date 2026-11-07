@@ -9,9 +9,6 @@ coverage.out
 # workflow, never committed.
 /code_review/
 
-# Session handoff notes (handoff skill): local to one machine's sessions
-/handover/session.md
-
 # Personal Claude Code settings
 /.claude/settings.local.json
 

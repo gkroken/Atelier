@@ -6,14 +6,18 @@ description: Write a short session handoff before /clear or at the end of a work
 # Session handoff
 
 Context is expensive; a fresh session that reads a good note is cheap. Write
-`handover/session.md` (gitignored), **at most 40 lines**, then tell the user they can
-`/clear` and start the next session with: `Read handover/session.md and continue.`
+`code_review/HANDOFF.md` (local, gitignored, read by the coder only, never the reviewer),
+**at most 40 lines**, then tell the user they can `/clear` and start the next session
+with: `Read code_review/HANDOFF.md and continue.` Replace the old note; keep only lessons
+that still apply.
 
 ```markdown
 # Handoff — <date> — <one-line goal>
 
-## State
-- Branch / last commit: <sha> <subject>
+## Where it stopped (read this first)
+- Last commit: <sha> <subject> — review: <verdict, or "waiting">
+- Open findings to fix: <ids from code_review/LEDGER.md, or none>
+- Stashed: <git stash list entries, or none>
 - Checks: <output line of scripts/check.sh>
 
 ## Done this session
@@ -28,7 +32,7 @@ Context is expensive; a fresh session that reads a good note is cheap. Write
 ## Next step
 1. <the very next concrete action, with the file to open>
 
-## Gotchas found
+## Lessons
 - <thing that cost time and would again>
 ```
 
