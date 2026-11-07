@@ -1,0 +1,14 @@
+# Build output
+/atelier
+coverage.out
+
+# Full check logs written by scripts/*.sh (kept local, grepped on failure)
+/.logs/
+
+# Session handoff notes (handoff skill): local to one machine's sessions
+/handover/session.md
+
+# Personal Claude Code settings
+/.claude/settings.local.json
+
+__pycache__/
