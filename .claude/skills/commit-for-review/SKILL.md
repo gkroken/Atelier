@@ -9,7 +9,7 @@ description: Commit one finished unit of work in Atelier, then wait for the revi
    - Never weaken or skip a test to make it pass.
 2. **Commit one logical change.** The code, its test and its docs go in the same commit.
    - Commit as `git -c user.name=gard1 -c user.email=89836666+gkroken@users.noreply.github.com commit -F <msgfile>`. Write the message file in the scratchpad.
-   - Message: `<scope>: <what and why>`. Scopes: launcher, proxy, auth, backend, ide, db, ui, admin, scripts, docs, plan, test.
+   - Message: `<scope>: <what and why>`. Scopes: launcher, proxy, auth, backend, ide, config, db, ui, admin, scripts, docs, plan, test.
    - Every claim in the message must be true, and must say how it was tested ("tested: scripts/check.sh + live start of an RStudio session", "not yet tried against a real Docker host").
    - A fix cites its finding IDs, for example `(atelier-d34a1a6-N1)`.
    - A change to something an ADR locks also updates `docs/DECISIONS.md` (the `adr` skill) in the same commit.
