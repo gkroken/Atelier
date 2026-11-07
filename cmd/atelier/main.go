@@ -1,8 +1,17 @@
 // Command atelier is, for now, the spine #0 spike: a launcher and the /s/<id>/ proxy in
 // one binary, for the one OS account that runs it.
 //
-// There is no sign-in yet (spine #2). Whoever can reach the listen address acts as the
-// account running atelier, so it listens on loopback only and refuses anything else.
+// There is no sign-in yet (spine #2), so it guards itself the way Jupyter's single-user
+// server does:
+//   - it listens on loopback only;
+//   - every request must carry a Host header naming that loopback address, so a website
+//     can't reach it through DNS rebinding (atelier-bfa99dc-F1);
+//   - every request must carry a random token, given once in the printed URL and then
+//     kept in an HttpOnly, SameSite=Strict cookie, so other accounts on the same machine
+//     can't use it just by connecting to loopback (atelier-bfa99dc-N1);
+//   - writes must be same-origin.
+//
+// Even so, run it only on a machine you trust: the token is printed to your terminal.
 //
 //	atelier [-listen 127.0.0.1:8080] [-home DIR]
 //
@@ -12,6 +21,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -25,6 +37,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -63,8 +76,51 @@ func run() error {
 	identify := func(*http.Request) (string, bool) { return acct.Name, true }
 	l := launcher.New(be, identify, launcher.Options{Logger: log})
 
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		return err
+	}
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	token := newToken()
+	handler := newHandler(l, acct, token, port, log)
+
+	srv := &http.Server{
+		Addr:              *listen,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		// No WriteTimeout: IDE long-polls and websockets stay open.
+	}
+	fmt.Printf("atelier spike: sessions run as %s (uid %d) with %s mounted.\n", acct.Name, acct.UID, acct.Home)
+	fmt.Printf("Open http://127.0.0.1:%s/?token=%s\n", port, token)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	errc := make(chan error, 1)
+	go func() { errc <- srv.Serve(ln) }()
+	select {
+	case err := <-errc:
+		return err
+	case <-ctx.Done():
+	}
+	shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(shutdown)
+	for _, s := range l.List(acct.Name) {
+		if err := l.Quit(shutdown, acct.Name, s.ID); err != nil {
+			log.Warn("quit session on exit", "session", s.ID, "err", err)
+		}
+	}
+	return nil
+}
+
+// cookieName holds the spike's access token in the browser. The proxy strips it before
+// requests reach an IDE.
+const cookieName = "atelier_spike"
+
+// newHandler is the spike's whole HTTP surface, behind guard.
+func newHandler(l *launcher.Launcher, acct launcher.Account, token, port string, log *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle(proxy.Prefix, proxy.New(l, proxy.Options{Logger: log}))
+	mux.Handle(proxy.Prefix, proxy.New(l, proxy.Options{Cookies: []string{cookieName}, Logger: log}))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'")
@@ -91,37 +147,55 @@ func run() error {
 		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	}))
+	return guard(mux, token, port)
+}
 
-	srv := &http.Server{
-		Addr:              *listen,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		// No WriteTimeout: IDE long-polls and websockets stay open.
+// guard admits a request only if its Host is the loopback address the spike listens on
+// and it carries the token. A request with ?token=<token> gets the cookie and is
+// redirected to the same URL without the token, so it doesn't stay in the address bar.
+func guard(next http.Handler, token, port string) http.Handler {
+	allowed := map[string]bool{
+		"127.0.0.1:" + port: true,
+		"[::1]:" + port:     true,
+		"localhost:" + port: true,
 	}
-	ln, err := net.Listen("tcp", *listen)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("atelier spike: http://%s/ (sessions run as %s, uid %d, home %s)\n", ln.Addr(), acct.Name, acct.UID, acct.Home)
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	errc := make(chan error, 1)
-	go func() { errc <- srv.Serve(ln) }()
-	select {
-	case err := <-errc:
-		return err
-	case <-ctx.Done():
-	}
-	shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdown)
-	for _, s := range l.List(acct.Name) {
-		if err := l.Quit(shutdown, acct.Name, s.ID); err != nil {
-			log.Warn("quit session on exit", "session", s.ID, "err", err)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !allowed[strings.ToLower(r.Host)] {
+			http.Error(w, "unknown host", http.StatusMisdirectedRequest)
+			return
 		}
-	}
-	return nil
+		if q := r.URL.Query(); q.Has("token") {
+			if !tokenEqual(q.Get("token"), token) {
+				http.Error(w, "wrong token", http.StatusForbidden)
+				return
+			}
+			http.SetCookie(w, &http.Cookie{
+				Name: cookieName, Value: token, Path: "/",
+				HttpOnly: true, SameSite: http.SameSiteStrictMode,
+			})
+			q.Del("token")
+			u := *r.URL
+			u.RawQuery = q.Encode()
+			http.Redirect(w, r, u.RequestURI(), http.StatusSeeOther)
+			return
+		}
+		c, err := r.Cookie(cookieName)
+		if err != nil || !tokenEqual(c.Value, token) {
+			http.Error(w, "open the URL atelier printed when it started", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func tokenEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+func newToken() string {
+	b := make([]byte, 24)
+	_, _ = rand.Read(b) // never fails on Linux (Go 1.24+)
+	return hex.EncodeToString(b)
 }
 
 // loopbackOnly refuses a listen address anyone but this machine can reach.

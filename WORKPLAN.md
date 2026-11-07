@@ -113,7 +113,9 @@ Dependency-ordered. Each item lists what "done" means.
   published on the host, and from a session to a service on the host's 0.0.0.0.
   Main-host endpoints refuse cross-origin writes (ADR-0016 amendment): a POST with a
   valid cookie and `Origin: https://<sessions host>` or `Sec-Fetch-Site: same-site` is
-  refused, with a test. Session ownership uses the canonical name `getpwnam` returns
+  refused, with a test. Every request whose Host isn't the configured main or sessions
+  host (ADR-0016) is refused before routing, against DNS rebinding, with a test
+  (atelier-bfa99dc-F1). Session ownership uses the canonical name `getpwnam` returns
   (`pw_name`), never what the user typed: a test signs in to one account under two
   spellings (`alice`, `ALICE` or `alice@corp`) and sees one session list
   (atelier-3b90b60-N3).
