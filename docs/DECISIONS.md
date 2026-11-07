@@ -351,6 +351,14 @@ Atelier's own account may be in that group.
 setuid helper (extra install step and attack surface, not needed with `pam_sss`); the
 `msteinert/pam` package (fine, but a dependency for about a hundred lines of cgo).
 
+**Amendment (2026-11-07, spine #2b-ii, user's choice):** a development machine signs in
+with `auth.dev: {}` instead of PAM: only the account running Atelier, with the fixed
+password `atelier-dev` (`internal/auth/devauth`). No sudo, no `/etc/pam.d` file, and no
+real password on a dev machine. Config refuses it unless `server.listen` is loopback,
+and together with `auth.pam`; Atelier logs a warning and every page says so. Dev uses
+two hosts too (`localhost` and `sessions.localhost`, which browsers resolve to loopback),
+so the single-hostname development mode ADR-0016 allowed isn't needed and isn't offered.
+
 ---
 
 ## ADR-0018 — Configuration as code: one strict YAML file is the source of truth

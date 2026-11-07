@@ -39,6 +39,16 @@ func TestMinimalGetsDefaults(t *testing.T) {
 	}
 }
 
+func TestDevOnLoopback(t *testing.T) {
+	for _, listen := range []string{"127.0.0.1:8080", "localhost:8080", "\"[::1]:8080\"", "127.0.0.2:1"} {
+		doc := strings.Replace(strings.Replace(minimal, "  pam: {}", "  dev: {}", 1), "127.0.0.1:8080", listen, 1)
+		c, err := Load([]byte(doc), env(nil))
+		if err != nil || c.Auth.Dev == nil {
+			t.Errorf("%s: %v", listen, err)
+		}
+	}
+}
+
 func TestDockerDefaultsMatchTheBackend(t *testing.T) {
 	if DefaultDockerSocket != docker.DefaultSocket || DefaultDockerNetwork != docker.DefaultNetwork {
 		t.Errorf("config defaults %q %q, backend %q %q", DefaultDockerSocket, DefaultDockerNetwork, docker.DefaultSocket, docker.DefaultNetwork)
@@ -127,6 +137,10 @@ func TestRefusals(t *testing.T) {
 		{"tls without key", strings.Replace(minimal, "auth:", "  tls: {certFile: /etc/c.pem}\nauth:", 1), "server.tls.keyFile: required"},
 		{"relative tls cert", strings.Replace(minimal, "auth:", "  tls: {certFile: c.pem, keyFile: /etc/k.pem}\nauth:", 1), "server.tls.certFile: want an absolute"},
 		{"empty tls", strings.Replace(minimal, "auth:", "  tls:\nauth:", 1), "server.tls: empty"},
+		{"dev with pam", strings.Replace(minimal, "  pam: {}", "  pam: {}\n  dev: {}", 1), "auth.dev: not together with auth.pam"},
+		{"dev on all addresses", strings.Replace(strings.Replace(minimal, "  pam: {}", "  dev: {}", 1), "127.0.0.1:8080", "0.0.0.0:8080", 1), "auth.dev: only when server.listen is a loopback"},
+		{"dev on an empty host", strings.Replace(strings.Replace(minimal, "  pam: {}", "  dev: {}", 1), "127.0.0.1:8080", "\":8080\"", 1), "auth.dev: only when server.listen is a loopback"},
+		{"dev with settings", strings.Replace(minimal, "  pam: {}", "  dev: {password: x}", 1), "auth.dev.password: unknown key"},
 		{"relative socket", minimal + "docker:\n  socket: docker.sock\n", "docker.socket: want an absolute"},
 		{"bad network", minimal + "docker:\n  network: -x\n", "docker.network: want a Docker network name"},
 	} {

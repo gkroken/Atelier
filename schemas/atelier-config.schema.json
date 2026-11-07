@@ -51,6 +51,12 @@
             "clientSecret": {"type": "string", "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$", "description": "A ${NAME} placeholder, read from the environment."},
             "usernameClaim": {"type": "string", "default": "preferred_username", "description": "Claim mapped to a host account."}
           }
+        },
+        "dev": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Development only: sign in as the account running Atelier with the password atelier-dev. Needs a loopback server.listen; not with pam.",
+          "properties": {}
         }
       }
     },

@@ -62,7 +62,14 @@ type TLS struct {
 type Auth struct {
 	PAM  *PAM  `json:"pam,omitempty"`
 	OIDC *OIDC `json:"oidc,omitempty"`
+	// Dev is development-only sign-in: the account running Atelier, with the password
+	// "atelier-dev" (internal/auth/devauth). Only with a loopback server.listen, and
+	// not together with pam.
+	Dev *Dev `json:"dev,omitempty"`
 }
+
+// Dev has no settings; dev: {} turns it on.
+type Dev struct{}
 
 // PAM signs in with the host's accounts through a PAM service (ADR-0017).
 type PAM struct {
@@ -349,6 +356,19 @@ var (
 	networkRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
 )
 
+// LoopbackListen reports whether a listen address is reachable from this machine only.
+func LoopbackListen(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // hostname drops an optional :port.
 func hostname(hostport string) string {
 	if h, _, err := net.SplitHostPort(hostport); err == nil {
@@ -391,8 +411,16 @@ func (c *Config) validate() error {
 		}
 	}
 
-	if c.Auth.PAM == nil && c.Auth.OIDC == nil {
+	if c.Auth.PAM == nil && c.Auth.OIDC == nil && c.Auth.Dev == nil {
 		bad("auth", "turn on at least one of pam and oidc")
+	}
+	if c.Auth.Dev != nil {
+		if c.Auth.PAM != nil {
+			bad("auth.dev", "not together with auth.pam; dev sign-in is for a development machine")
+		}
+		if !LoopbackListen(s.Listen) {
+			bad("auth.dev", "only when server.listen is a loopback address (127.0.0.1, [::1] or localhost), got %q", s.Listen)
+		}
 	}
 	if p := c.Auth.PAM; p != nil && !serviceRE.MatchString(p.Service) {
 		bad("auth.pam.service", "want a PAM service name like %q, got %q", DefaultPAMService, p.Service)

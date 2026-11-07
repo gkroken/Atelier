@@ -249,3 +249,20 @@ func (l *Launcher) List(user string) []Session {
 	sort.Slice(out, func(i, j int) bool { return out[i].Started.Before(out[j].Started) })
 	return out
 }
+
+// QuitAll quits every session, of every user: Atelier is shutting down, and until
+// spine #3 reconciles containers on startup, sessions it no longer knows about would
+// be unreachable. Errors are logged and the rest still quit.
+func (l *Launcher) QuitAll(ctx context.Context) {
+	l.mu.Lock()
+	all := make([]*Session, 0, len(l.sessions))
+	for _, s := range l.sessions {
+		all = append(all, s)
+	}
+	l.mu.Unlock()
+	for _, s := range all {
+		if err := l.Quit(ctx, s.Owner, s.ID); err != nil && !errors.Is(err, ErrNotFound) {
+			l.log.Warn("quit session on shutdown", "session", s.ID, "err", err)
+		}
+	}
+}

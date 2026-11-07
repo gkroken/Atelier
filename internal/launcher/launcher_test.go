@@ -363,3 +363,19 @@ func TestHealthPathFollowsStripPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestQuitAllQuitsEveryUsersSessions(t *testing.T) {
+	be := newFakeBackend()
+	l := newLauncher(be)
+	def, _ := ideServer(t, 200)
+	bob := Account{Name: "bob", UID: 4400, GID: 4400, Home: "/home/bob"}
+	for _, a := range []Account{alice, alice, bob} {
+		if _, err := l.Start(context.Background(), a, def); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.QuitAll(context.Background())
+	if n := len(l.List("alice")) + len(l.List("bob")); n != 0 || be.live() != 0 || len(be.removed) != 3 {
+		t.Errorf("after QuitAll: %d listed, %d live, %d removed", n, be.live(), len(be.removed))
+	}
+}

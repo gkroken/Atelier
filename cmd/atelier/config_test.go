@@ -21,6 +21,13 @@ func TestExamplePassesConfigCheck(t *testing.T) {
 	}
 }
 
+func TestDevExamplePassesConfigCheck(t *testing.T) {
+	var out strings.Builder
+	if err := checkConfig("../../deploy/config/atelier.dev.yaml", &out); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestConfigCheckRefuses(t *testing.T) {
 	t.Setenv("ATELIER_OIDC_CLIENT_SECRET", "") // restored after the test
 	os.Unsetenv("ATELIER_OIDC_CLIENT_SECRET")

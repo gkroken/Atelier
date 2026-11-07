@@ -30,6 +30,21 @@ Browser ──► Atelier (Go) ──► Docker host
           PostgreSQL                                           └── /home/<user> (host or NFS)
 ```
 
+## Try it on a development machine
+
+Needs Go, gcc, `libpam0g-dev` and Docker (your account in the `docker` group).
+
+```bash
+go build -o atelier ./cmd/atelier
+./atelier -config deploy/config/atelier.dev.yaml
+```
+
+Open <http://localhost:8080/> and sign in as your own account with the password
+`atelier-dev` (development sign-in: no PAM, no real password; refused beyond
+loopback). Sessions open on `sessions.localhost:8080`, which browsers send to this
+machine without a DNS entry. A session mounts your real home folder. For a server,
+start from [`deploy/config/atelier.example.yaml`](deploy/config/atelier.example.yaml).
+
 ## Documentation
 
 | | |

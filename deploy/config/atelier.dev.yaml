@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../schemas/atelier-config.schema.json
+#
+# A development machine: no AD, no sudo, no real password.
+#
+#   go build -o atelier ./cmd/atelier && ./atelier -config deploy/config/atelier.dev.yaml
+#
+# Open http://localhost:8080/ and sign in as your own account with the password
+# atelier-dev. Browsers send *.localhost to this machine, so sessions.localhost needs
+# no DNS entry. Never use auth.dev on a server: Atelier refuses it beyond loopback.
+
+server:
+  listen: 127.0.0.1:8080
+  mainHost: localhost:8080
+  sessionsHost: sessions.localhost:8080
+
+auth:
+  dev: {}
