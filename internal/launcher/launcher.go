@@ -113,6 +113,8 @@ func (l *Launcher) Start(ctx context.Context, acct Account, def ide.Definition) 
 		// Same path inside as outside, as on Workbench: absolute paths in users' scripts
 		// keep working.
 		Home: backend.Mount{Source: acct.Home, Target: acct.Home},
+		// Every field of these lines is checked: names by ValidName, the home by
+		// SessionEnv's Params.Validate (ide.PasswdSafe); IDs are numbers.
 		Files: []backend.File{
 			{Path: "/etc/passwd", Mode: 0o644, Content: fmt.Appendf(nil, "%s:x:%d:%d::%s:/bin/bash\n", acct.Name, acct.UID, acct.GID, acct.Home)},
 			{Path: "/etc/group", Mode: 0o644, Content: fmt.Appendf(nil, "%s:x:%d:%s\n", group, acct.GID, acct.Name)},
@@ -154,8 +156,8 @@ func (l *Launcher) Start(ctx context.Context, acct Account, def ide.Definition) 
 
 // waitHealthy polls the container until it has an address and the IDE's health check
 // passes, or the timeout runs out. A container that exits stops the wait at once.
-func (l *Launcher) waitHealthy(ctx context.Context, cid string, def ide.Definition) (*url.URL, error) {
-	ctx, cancel := context.WithTimeout(ctx, l.opts.HealthTimeout)
+func (l *Launcher) waitHealthy(parent context.Context, cid string, def ide.Definition) (*url.URL, error) {
+	ctx, cancel := context.WithTimeout(parent, l.opts.HealthTimeout)
 	defer cancel()
 	var target *url.URL
 	for {
@@ -180,6 +182,10 @@ func (l *Launcher) waitHealthy(ctx context.Context, cid string, def ide.Definiti
 		}
 		select {
 		case <-ctx.Done():
+			if err := parent.Err(); err != nil {
+				// The caller gave up (the browser went away); not a slow IDE.
+				return nil, fmt.Errorf("waiting for the IDE: %w", err)
+			}
 			return nil, fmt.Errorf("IDE not healthy after %v", l.opts.HealthTimeout)
 		case <-time.After(50 * time.Millisecond):
 		}

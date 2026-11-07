@@ -95,9 +95,22 @@ var (
 	prefixRE = regexp.MustCompile(`^(/[A-Za-z0-9._-]+)+$`)
 )
 
+// PasswdSafe reports whether s can be one field of an /etc/passwd or /etc/group line:
+// no ":" (the field separator) and no control characters (a newline would start a new
+// entry). User and group names meet a stricter rule (ValidName); this is the rule for
+// the home folder, and the minimum any field in those files must meet.
+func PasswdSafe(s string) bool {
+	for _, r := range s {
+		if r == ':' || r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 // ValidName reports whether name is allowed as a user or group name: it ends up in the
 // container's /etc/passwd and /etc/group, in paths, and in environment variables.
-func ValidName(name string) bool { return userRE.MatchString(name) }
+func ValidName(name string) bool { return userRE.MatchString(name) && PasswdSafe(name) }
 
 // Validate checks every field. Each one ends up in an environment variable that a
 // definition may use in a path, so each must be present and unable to escape.
@@ -110,6 +123,9 @@ func (p Params) Validate() error {
 	}
 	if !path.IsAbs(p.Home) || path.Clean(p.Home) != p.Home || p.Home == "/" {
 		return fmt.Errorf("home %q: want an absolute, clean path below /", p.Home)
+	}
+	if !PasswdSafe(p.Home) {
+		return fmt.Errorf("home %q: contains \":\" or a control character", p.Home)
 	}
 	if !prefixRE.MatchString(p.Prefix) {
 		return fmt.Errorf("prefix %q: want /segment[/segment...] with no trailing slash", p.Prefix)

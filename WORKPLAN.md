@@ -113,10 +113,16 @@ Dependency-ordered. Each item lists what "done" means.
   published on the host, and from a session to a service on the host's 0.0.0.0.
   Main-host endpoints refuse cross-origin writes (ADR-0016 amendment): a POST with a
   valid cookie and `Origin: https://<sessions host>` or `Sec-Fetch-Site: same-site` is
-  refused, with a test.
+  refused, with a test. Session ownership uses the canonical name `getpwnam` returns
+  (`pw_name`), never what the user typed: a test signs in to one account under two
+  spellings (`alice`, `ALICE` or `alice@corp`) and sees one session list
+  (atelier-3b90b60-N3).
 - [ ] **#3 Schema.** PostgreSQL schema for users, sessions, images, profiles, grants;
   migrations. *Done:* migrations run forward from empty; schema reviewed before anything
-  depends on it.
+  depends on it. On startup Atelier reconciles containers labelled `atelier.session` with
+  the stored sessions: it adopts the known ones and removes the rest, including a
+  container from a crash between create and registration. A live test kills and restarts
+  Atelier and finds its sessions listed and no orphans (atelier-3b90b60-N2).
 - [ ] **#4 Home page and New Session dialog.**
 - [ ] **#5 Suspend and resume**, idle detection per IDE. *Done:* a suspend hook in each
   definition saves the IDE's state before the container stops, and Stop doesn't wait out

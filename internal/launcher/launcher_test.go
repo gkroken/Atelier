@@ -195,6 +195,8 @@ func TestStartRefusesBadAccounts(t *testing.T) {
 		"colon in group":  func(a *Account) { a.Group = "staff:x:0:" },
 		"relative home":   func(a *Account) { a.Home = "home/alice" },
 		"root home":       func(a *Account) { a.Home = "/" },
+		"colon in home":   func(a *Account) { a.Home = "/home/a:b" },
+		"newline in home": func(a *Account) { a.Home = "/home/a\nroot:x:0:0::/:/bin/sh" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			be := newFakeBackend()
@@ -309,5 +311,21 @@ func TestThroughTheProxy(t *testing.T) {
 	}
 	if code, _ := get("", "/s/"+s.ID+"/x"); code != 404 {
 		t.Errorf("not signed in: %d", code)
+	}
+}
+
+// A start the caller cancels says so, not that the IDE was slow (atelier-3b90b60-N1).
+func TestCanceledStartSaysCanceled(t *testing.T) {
+	def, _ := ideServer(t, 503) // never healthy
+	be := newFakeBackend()
+	l := New(be, headerIdentify, Options{HealthTimeout: time.Minute, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, err := l.Start(ctx, alice, def)
+	if !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "not healthy") {
+		t.Errorf("err = %v, want the caller's context error", err)
+	}
+	if be.live() != 0 {
+		t.Error("container left behind")
 	}
 }
