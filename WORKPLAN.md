@@ -135,7 +135,11 @@ background jobs; any forge or Skald integration.
   `id <user>`, `/etc/pam.d/rstudio`), and that a new host would map users to the same IDs.
 - [ ] How many users and concurrent sessions, and how big the host is (CPU/RAM/disk).
 - [ ] Do homes stay on the Workbench server's disk, or move to an NFS share?
-- [ ] TLS: does Atelier handle it itself, or sit behind an existing reverse proxy?
+- [ ] TLS: does Atelier handle it itself, or sit behind an existing reverse proxy? (If
+  behind one, the proxy needs a trusted-front-proxy setting for X-Forwarded-Proto,
+  atelier-fa69e6c-N4.)
+- [ ] Confirm ADR-0016 (proposed): sessions on their own hostname, e.g.
+  `sessions.atelier.example.org/s/<id>/`, separate from Atelier's own pages.
 - [ ] Who builds session images, and where: plain Dockerfiles in this repo, or Skald's
   build sandbox?
 - [ ] Migration: move users over one at a time, or switch everyone on a set day?

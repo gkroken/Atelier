@@ -244,3 +244,45 @@ out of a session must be added to this table, with the test that holds it:
 | session -> internet and the LAN | yes (package installs, git, data sources, as on Workbench today) | | admins may narrow later |
 | Atelier process -> session | yes (the proxy dials container IPs) | replies to it pass the firewall as established traffic | done |
 | other host accounts -> session | no | host firewall: only Atelier's account may open connections to the session bridge | spine #2 |
+
+**Amended 2026-11-07 — two more rows** (atelier-54063f0-N1):
+
+| Path | Allowed? | Held by | Status |
+|---|---|---|---|
+| session -> DNS (Docker's embedded resolver, forwarding to the host's) | yes | the spine #2 firewall rule must keep it working; its live test resolves a public name from a session | spine #2 |
+| session -> link-local metadata (169.254.169.254) | no | host firewall rule | n/a on the on-prem host; required before Atelier runs on any cloud VM |
+
+---
+
+## ADR-0016 — Session URLs are /s/<id>/ on a hostname of their own
+
+**Date:** 2026-11-07 · **Status:** proposed — awaiting the user's confirmation (atelier-fa69e6c-Q1)
+
+The session URL is what people bookmark and keep in open tabs, so it is expensive to
+change. The ID part was agreed with the user: 128 random bits as 26 lowercase base32
+characters (`internal/session`), so `/s/k3j9…/`. An ID is unguessable but not a
+credential; every request is still checked against the session's owner.
+
+The host part matters for security. A session serves whatever HTML and JavaScript its
+user's code produces (htmlwidgets, reports, a package's viewer output). If that shares an
+origin with Atelier's own pages, it can call Atelier's API as that user, and as an admin
+when the user is one (publish an image every user then runs). JupyterHub's security
+guidance says the same: don't serve user content on the hub's origin. Users can't reach
+each other's sessions either way, because the proxy's Resolver refuses them.
+
+**Decision:** sessions are served at `https://<sessions host>/s/<id>/`, and the sessions
+host is a different hostname from the one serving sign-in, the home page and the admin
+dashboard (for example `atelier.example.org` and `sessions.atelier.example.org`). Atelier's
+cookies are host-only `__Host-` cookies with SameSite=Lax or Strict, so neither host's
+cookie is sent to the other. Signing in to the sessions host is a redirect from the main
+host with a single-use token (spine #2). A single hostname for both is allowed only in
+development, with a warning in the log.
+
+**Consequences:** one extra DNS name and TLS certificate (not a wildcard). Session-to-
+session separation between a user's own sessions isn't needed (same user). If sharing a
+session with another user ever arrives, per-session subdomains (`<id>.sessions...`, which
+needs a wildcard) come back up, as JupyterHub requires for sharing.
+
+**Rejected:** one origin for everything, as Workbench does (session content gets the
+user's Atelier rights, including admin rights); per-session subdomains now (a wildcard
+DNS name and certificate for a protection v1 doesn't need).
