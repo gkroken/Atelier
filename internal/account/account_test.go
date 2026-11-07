@@ -39,6 +39,11 @@ func TestResolve(t *testing.T) {
 		"dotdot":   {Uid: "1007", Gid: "1007", Username: "dotdot", HomeDir: "/home/../etc"},
 		"badname":  {Uid: "1008", Gid: "1008", Username: "bad name", HomeDir: "/home/x"},
 		"colonusr": {Uid: "1009", Gid: "1009", Username: "a:b", HomeDir: "/home/x"},
+		"nobody":   {Uid: "65534", Gid: "65534", Username: "nobody", HomeDir: "/nonexistent"},
+		"nogroup":  {Uid: "1010", Gid: "65534", Username: "nogroup", HomeDir: "/home/x"},
+		"uid65535": {Uid: "65535", Gid: "1011", Username: "uid65535", HomeDir: "/home/x"},
+		"minus2":   {Uid: "4294967294", Gid: "1012", Username: "minus2", HomeDir: "/home/x"},
+		"minus1":   {Uid: "1013", Gid: "4294967295", Username: "minus1", HomeDir: "/home/x"},
 	}, map[string][]string{"alice": {"1001", "0", "2000", "2000", "x", "1500"}})
 
 	for _, name := range []string{"alice", "ALICE", "alice@corp"} {
@@ -69,6 +74,11 @@ func TestResolve(t *testing.T) {
 		{"dotdot", ErrRefused, "home folder"},
 		{"badname", ErrRefused, "characters"},
 		{"colonusr", ErrRefused, "characters"},
+		{"nobody", ErrRefused, "nobody's"},
+		{"nogroup", ErrRefused, "nobody's"},
+		{"uid65535", ErrRefused, "nobody's"},
+		{"minus2", ErrRefused, "nobody's"},
+		{"minus1", ErrRefused, "nobody's"},
 	} {
 		_, err := o.Resolve(tc.name)
 		if !errors.Is(err, tc.want) || !strings.Contains(err.Error(), tc.says) {
@@ -100,6 +110,11 @@ func TestHostResolvesTheCurrentUser(t *testing.T) {
 	}
 	if a.Name != me.Username || a.Home != me.HomeDir {
 		t.Errorf("got %+v for %s", a, me.Username)
+	}
+	if _, err := user.Lookup("nobody"); err == nil {
+		if _, err := Host.Resolve("nobody"); !errors.Is(err, ErrRefused) {
+			t.Errorf("host's nobody: %v, want ErrRefused", err)
+		}
 	}
 	if _, err := Host.Resolve("atelier-no-such-user-x9"); !errors.Is(err, ErrNoAccount) {
 		t.Errorf("unknown user: %v", err)

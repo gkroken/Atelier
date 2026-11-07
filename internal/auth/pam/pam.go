@@ -109,6 +109,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"unsafe"
 )
@@ -140,14 +142,40 @@ type Checker struct {
 	slots   chan struct{}
 }
 
+// systemDirs is where Linux-PAM looks for a service without a confdir: /etc/pam.d, then
+// the vendor folder some distributions use.
+var systemDirs = []string{"/etc/pam.d", "/usr/lib/pam.d"}
+
 // New returns a Checker for service (/etc/pam.d/<service>). confdir, when not empty, is
 // a folder to read the service from instead (pam_start_confdir; used by tests).
 // At most concurrent checks run at once; more get ErrBusy.
-func New(service, confdir string, concurrent int) *Checker {
+//
+// The service's file must exist. Without it Linux-PAM quietly uses /etc/pam.d/other,
+// so sign-in would either fail for everyone as a "wrong password" or run through a
+// stack ADR-0017 didn't choose (atelier-7e6f55e-F2).
+func New(service, confdir string, concurrent int) (*Checker, error) {
+	if service == "" || service == "." || service == ".." || strings.ContainsAny(service, "/\x00") {
+		return nil, fmt.Errorf("pam: bad service name %q", service)
+	}
+	dirs := systemDirs
+	if confdir != "" {
+		dirs = []string{confdir}
+	}
+	found := false
+	for _, d := range dirs {
+		if fi, err := os.Stat(filepath.Join(d, service)); err == nil && fi.Mode().IsRegular() {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("pam: no file for PAM service %q: create %s (ADR-0017); without it PAM falls back to the \"other\" service",
+			service, filepath.Join(dirs[0], service))
+	}
 	if concurrent < 1 {
 		concurrent = 1
 	}
-	return &Checker{service: service, confdir: confdir, slots: make(chan struct{}, concurrent)}
+	return &Checker{service: service, confdir: confdir, slots: make(chan struct{}, concurrent)}, nil
 }
 
 // Check verifies user's password and that the account may sign in. It returns the

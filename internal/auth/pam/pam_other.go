@@ -17,7 +17,9 @@ var (
 // Checker is unavailable without cgo on Linux; Check always fails.
 type Checker struct{}
 
-func New(service, confdir string, concurrent int) *Checker { return &Checker{} }
+func New(service, confdir string, concurrent int) (*Checker, error) {
+	return nil, errors.New("pam: this build has no PAM support (needs Linux and cgo)")
+}
 
 func (c *Checker) Check(ctx context.Context, user, password string) (string, error) {
 	return "", errors.New("pam: this build has no PAM support (needs Linux and cgo)")

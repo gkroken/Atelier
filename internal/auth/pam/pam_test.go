@@ -58,7 +58,51 @@ func testChecker(t *testing.T, concurrent int) (*Checker, string) {
 	if err := os.WriteFile(filepath.Join(conf, "atelier-test"), []byte(strings.ReplaceAll(service, "DIR", dir)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return New("atelier-test", conf, concurrent), dir
+	c, err := New("atelier-test", conf, concurrent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, dir
+}
+
+// Without a confdir, the service's file must exist in the system folders, or New
+// refuses (PAM would fall back to "other"). A temp folder stands in for /etc/pam.d.
+func TestNewRefusesAMissingServiceFile(t *testing.T) {
+	etc, vendor := t.TempDir(), t.TempDir()
+	defer func(d []string) { systemDirs = d }(systemDirs)
+	systemDirs = []string{etc, vendor}
+
+	_, err := New("atelier", "", 1)
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(etc, "atelier")) {
+		t.Fatalf("missing service: %v; want an error naming %s", err, filepath.Join(etc, "atelier"))
+	}
+	if err := os.Mkdir(filepath.Join(etc, "atelier"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New("atelier", "", 1); err == nil {
+		t.Fatal("a folder named like the service was accepted")
+	}
+	if err := os.WriteFile(filepath.Join(vendor, "atelier"), []byte("auth required pam_deny.so\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New("atelier", "", 1); err != nil {
+		t.Fatalf("service in the vendor folder: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(etc, "atelier-2"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New("atelier-2", "", 1); err != nil {
+		t.Fatalf("service in /etc/pam.d: %v", err)
+	}
+	// With a confdir, only the confdir counts.
+	if _, err := New("atelier-2", vendor, 1); err == nil {
+		t.Fatal("service missing from the confdir was accepted")
+	}
+	for _, bad := range []string{"", ".", "..", "../atelier", "a/b", "a\x00b"} {
+		if _, err := New(bad, etc, 1); err == nil || !strings.Contains(err.Error(), "bad service name") {
+			t.Errorf("service %q: %v", bad, err)
+		}
+	}
 }
 
 func TestCheck(t *testing.T) {

@@ -35,6 +35,17 @@ var (
 // far higher).
 const MinUID = 1000
 
+// overflowID reports the IDs reserved for nobody/nogroup and the overflow and "-1"
+// values: on NFS with root_squash, nobody owns every file root writes
+// (atelier-7e6f55e-F1).
+func overflowID(id int) bool {
+	switch id {
+	case 65534, 65535, 4294967294, 4294967295:
+		return true
+	}
+	return false
+}
+
 // Account is a host account: what the launcher needs, and the supplementary group IDs
 // (getgrouplist) for group grants (ADR-0013).
 type Account struct {
@@ -86,6 +97,9 @@ func (o OS) Resolve(name string) (Account, error) {
 	}
 	if gid == 0 {
 		return refuse("primary group is root's")
+	}
+	if overflowID(uid) || overflowID(gid) {
+		return refuse(fmt.Sprintf("account ID %d / group ID %d is nobody's or reserved", uid, gid))
 	}
 	if !filepath.IsAbs(u.HomeDir) || filepath.Clean(u.HomeDir) != u.HomeDir || u.HomeDir == "/" || !ide.PasswdSafe(u.HomeDir) {
 		return refuse(fmt.Sprintf("home folder %q", u.HomeDir))
