@@ -138,7 +138,7 @@ func (l *Launcher) Start(ctx context.Context, acct Account, def ide.Definition) 
 	if err := l.be.Start(ctx, cid); err != nil {
 		return fail(err)
 	}
-	target, err := l.waitHealthy(ctx, cid, def)
+	target, err := l.waitHealthy(ctx, cid, def, params.Prefix)
 	if err != nil {
 		return fail(err)
 	}
@@ -156,7 +156,13 @@ func (l *Launcher) Start(ctx context.Context, acct Account, def ide.Definition) 
 
 // waitHealthy polls the container until it has an address and the IDE's health check
 // passes, or the timeout runs out. A container that exits stops the wait at once.
-func (l *Launcher) waitHealthy(parent context.Context, cid string, def ide.Definition) (*url.URL, error) {
+func (l *Launcher) waitHealthy(parent context.Context, cid string, def ide.Definition, prefix string) (*url.URL, error) {
+	// The health path is relative to the session root; an IDE that keeps the prefix
+	// expects it on every request, health checks included.
+	healthPath := def.Health.Path
+	if !def.StripPrefix {
+		healthPath = prefix + healthPath
+	}
 	ctx, cancel := context.WithTimeout(parent, l.opts.HealthTimeout)
 	defer cancel()
 	var target *url.URL
@@ -172,7 +178,7 @@ func (l *Launcher) waitHealthy(parent context.Context, cid string, def ide.Defin
 			if target == nil {
 				target = &url.URL{Scheme: "http", Host: net.JoinHostPort(st.IP, strconv.Itoa(def.Port))}
 			}
-			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, target.String()+def.Health.Path, nil)
+			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, target.String()+healthPath, nil)
 			if resp, err := l.health.Do(req); err == nil {
 				resp.Body.Close()
 				if resp.StatusCode <= def.Health.MaxStatus {

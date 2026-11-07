@@ -8,7 +8,7 @@ import (
 )
 
 func TestRegistry(t *testing.T) {
-	if got := Names(); !slices.Equal(got, []string{"rstudio"}) {
+	if got := Names(); !slices.Equal(got, []string{"code-server", "rstudio"}) {
 		t.Errorf("Names = %v", got)
 	}
 	d, err := Lookup("rstudio")

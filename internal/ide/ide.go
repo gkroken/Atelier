@@ -43,8 +43,9 @@ type Definition struct {
 	Health Health
 }
 
-// Health is an HTTP check against the IDE's port, on the path the IDE sees (after any
-// prefix stripping).
+// Health is an HTTP check against the IDE's port. Path is relative to the session's root,
+// like a path after /s/<id>; for a definition that doesn't strip the prefix, the launcher
+// puts /s/<id> in front, so the check reaches the IDE the way the proxy would.
 type Health struct {
 	Path string
 	// MaxStatus is the highest HTTP status that counts as up. An IDE that redirects to

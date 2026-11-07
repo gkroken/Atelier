@@ -329,3 +329,37 @@ func TestCanceledStartSaysCanceled(t *testing.T) {
 		t.Error("container left behind")
 	}
 }
+
+// For a definition that keeps the prefix, the health check goes to /s/<id>/<path>, the
+// path the IDE serves; for one that strips it, to <path>.
+func TestHealthPathFollowsStripPrefix(t *testing.T) {
+	for _, strip := range []bool{true, false} {
+		var paths []string
+		var mu sync.Mutex
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			paths = append(paths, r.URL.Path)
+			mu.Unlock()
+			if strings.HasSuffix(r.URL.Path, "/api") {
+				return // 200
+			}
+			w.WriteHeader(404)
+		}))
+		_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+		p, _ := strconv.Atoi(port)
+		def := ide.Definition{Name: "fake", Title: "Fake", Image: "fake:1", Port: p, Cmd: []string{"x"},
+			StripPrefix: strip, Health: ide.Health{Path: "/api", MaxStatus: 299}}
+		s, err := newLauncher(newFakeBackend()).Start(context.Background(), alice, def)
+		srv.Close()
+		if err != nil {
+			t.Fatalf("strip=%v: %v", strip, err)
+		}
+		want := "/api"
+		if !strip {
+			want = "/s/" + s.ID + "/api"
+		}
+		if len(paths) == 0 || paths[len(paths)-1] != want {
+			t.Errorf("strip=%v: health checks went to %v, want %s", strip, paths, want)
+		}
+	}
+}

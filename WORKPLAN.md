@@ -124,8 +124,10 @@ Dependency-ordered. Each item lists what "done" means.
   second writes (0.28 s after the second session was started), which is what RStudio's
   file pane relies on (ADR-0007). Websockets through the proxy are tested against a raw
   upgrade echo (`internal/proxy`); RStudio's own websocket use isn't exercised yet.
-- [ ] **#1 Same spike for code-server and JupyterLab.** *Done:* all three IDEs behind the
-  proxy with no IDE-specific hacks outside one per-IDE definition file (ADR-0008).
+- [~] **#1 Same spike for code-server and JupyterLab.** *Done:* all three IDEs behind the
+  proxy with no IDE-specific hacks outside one per-IDE definition file (ADR-0008); a live
+  test exchanges websocket messages with a real IDE through the launcher and proxy, for
+  example JupyterLab's kernel channel (atelier-b5a2831-N1).
 - [ ] **#2 Identity.** PAM sign-in, account ID and groups from the OS (`getpwnam`,
   `getgrouplist`); OIDC sign-in mapping `preferred_username` to the same lookup.
   *Done:* tests for unknown user, disabled user, wrong password, user without an account
