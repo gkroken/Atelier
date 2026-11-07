@@ -252,11 +252,15 @@ out of a session must be added to this table, with the test that holds it:
 | session -> DNS (Docker's embedded resolver, forwarding to the host's) | yes | the spine #2 firewall rule must keep it working; its live test resolves a public name from a session | spine #2 |
 | session -> link-local metadata (169.254.169.254) | no | host firewall rule | n/a on the on-prem host; required before Atelier runs on any cloud VM |
 
+**Amended 2026-11-07 — confirmed by the user.** The decision above was first taken by the
+coder under the user's instruction to follow its recommendation while the user was away
+(atelier-4e18c55-Q1); the user has since confirmed it.
+
 ---
 
 ## ADR-0016 — Session URLs are /s/<id>/ on a hostname of their own
 
-**Date:** 2026-11-07 · **Status:** proposed — awaiting the user's confirmation (atelier-fa69e6c-Q1)
+**Date:** 2026-11-07 · **Status:** accepted 2026-11-07, with a subdomain (see the last amendment)
 
 The session URL is what people bookmark and keep in open tabs, so it is expensive to
 change. The ID part was agreed with the user: 128 random bits as 26 lowercase base32
@@ -311,3 +315,67 @@ as well:
   domain name. A subdomain is simpler to get from IT but relies on the CSRF check alone.
   Either way the check above is required. JupyterHub's guidance prefers a separate
   domain for the same reason.
+
+**Amended 2026-11-07 — accepted by the user, with a subdomain.** Sessions are served from a
+subdomain of Atelier's own domain (for example `sessions.atelier.example.org` next to
+`atelier.example.org`): one more DNS name under a domain IT already runs, and a second
+name on the same certificate. Because a subdomain is same-site, the cross-origin write
+rule above is what protects Atelier's pages, and it is required (spine #2).
+
+---
+
+## ADR-0017 — PAM sign-in through pam_sss, in process, as Atelier's own non-root account
+
+**Date:** 2026-11-07 · **Status:** accepted
+
+ADR-0005 says sign-in goes through PAM. Checking *another* user's password with
+`pam_unix` needs root (`unix_chkpwd` lets a non-root caller check only its own password),
+which would mean running Atelier as root or adding a setuid helper. On an AD-joined host
+the password check is `pam_sss`, which passes it to SSSD, and SSSD lets non-root
+services authenticate domain users (its `pam_trusted_users` default is all). The users
+are AD accounts.
+
+**Decision:** Atelier runs as a dedicated system account (`atelier`), a member of the
+`docker` group, and calls libpam in process through a small cgo binding of its own (no
+Go dependency; building needs the `libpam0g-dev` headers). Its PAM service is
+`/etc/pam.d/atelier`, using `pam_sss` for auth and account. Local, non-AD accounts can't
+sign in this way; that is accepted. Tests use a private PAM config folder
+(`pam_start_confdir`) with modules that need no root, such as `pam_exec`, so they run
+without installing anything into `/etc/pam.d`.
+
+**Note:** membership of `docker` is root-equivalent (CLAUDE.md), so this keeps password
+handling out of a root process but doesn't make Atelier unprivileged overall. Only
+Atelier's own account may be in that group.
+
+**Rejected:** running Atelier as root (a root process parsing passwords and HTTP); a
+setuid helper (extra install step and attack surface, not needed with `pam_sss`); the
+`msteinert/pam` package (fine, but a dependency for about a hundred lines of cgo).
+
+---
+
+## ADR-0018 — Configuration as code: one strict YAML file is the source of truth
+
+**Date:** 2026-11-07 · **Status:** accepted
+
+The user wants configuration as code, as in forge and Skald: a file in git describes the
+installation, and a change is a reviewed commit, not a click in an admin page.
+
+**Decision:** `atelier.yaml` is the source of truth for everything it declares: the main
+and sessions hostnames (ADR-0016), sign-in (PAM service, OIDC issuer and client), the
+Docker socket and session network, and later images (ADR-0014), resource profiles and
+group grants (ADR-0013), session caps and the idle timeout. As in forge:
+
+- An unknown key is an error at startup, so a typo fails loudly.
+- Secrets are never written in the file: `${NAME}` placeholders are expanded from the
+  environment, and an unset variable is an error, never an empty string.
+- `atelier -config-check -config <file>` validates a file without starting anything.
+- A JSON schema ships with it, for editor completion and CI checks, as in Skald.
+- Objects the file declares are read-only in the admin UI and API, shown as "config".
+
+Parsing uses `sigs.k8s.io/yaml` (MIT and BSD-3-Clause), which converts YAML to JSON and
+uses `encoding/json`, so the config structs use plain `json` tags, as forge does
+(user-approved dependency, 2026-11-07).
+
+**Rejected:** settings in the database edited through the UI (no review, no history);
+environment variables only (no structure for lists like images and grants); TOML or JSON
+(the sibling projects use YAML).

@@ -8,7 +8,7 @@ stops and escalates.
 Status legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 **Current status (2026-11-07):** spines #0 and #1 done on the dev host; the re-measure
-on the work server is owed. **NEXT = spine #2** (identity: PAM and OIDC sign-in).
+on the work server is owed. **NEXT = spine #1b** (the config file, ADR-0018), then #2.
 
 ---
 
@@ -138,7 +138,12 @@ Dependency-ordered. Each item lists what "done" means.
   `kernel_info_request` answered over the kernel's websocket channel). Healthy after
   about 1.2 s (RStudio median), 0.5 s (code-server) and 1.1 s (JupyterLab), single runs
   for the latter two. Not yet checked in a real browser.
-- [ ] **#2 Identity.** PAM sign-in, account ID and groups from the OS (`getpwnam`,
+- [ ] **#1b Config file** (ADR-0018). `atelier.yaml`: hostnames, listen address, sign-in,
+  Docker; loaded strictly, `${NAME}` secrets from the environment, `-config-check`, a JSON
+  schema and a worked example. *Done:* tests for an unknown key, an unset variable, a
+  missing required field and a bad value, each refused with a message naming the key;
+  the example passes `-config-check`; the schema and the Go structs can't drift (a test).
+- [ ] **#2 Identity.** PAM sign-in through `pam_sss` as the `atelier` account (ADR-0017), account ID and groups from the OS (`getpwnam`,
   `getgrouplist`); OIDC sign-in mapping `preferred_username` to the same lookup.
   *Done:* tests for unknown user, disabled user, wrong password, user without an account
   ID; user A denied user B's session. Host firewall rules for the session network
@@ -187,10 +192,8 @@ background jobs; any forge or Skald integration.
 - [ ] TLS: does Atelier handle it itself, or sit behind an existing reverse proxy? (If
   behind one, the proxy needs a trusted-front-proxy setting for X-Forwarded-Proto,
   atelier-fa69e6c-N4.)
-- [ ] Confirm ADR-0016 (proposed): sessions on their own hostname, separate from
-  Atelier's own pages, and choose a subdomain (`sessions.atelier.example.org`, relies on
-  the CSRF check alone) or a separate domain (`atelier-sessions.example.net`, also
-  cross-site for SameSite).
+- [x] ADR-0016 confirmed with a subdomain (2026-11-07).
+- [ ] The two hostnames on the work server, and who issues their certificate.
 - [ ] Who builds session images, and where: plain Dockerfiles in this repo, or Skald's
   build sandbox?
 - [ ] Migration: move users over one at a time, or switch everyone on a set day?
