@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -40,11 +41,10 @@ func (p *fakePAM) Check(_ context.Context, user, password string) (string, error
 	p.calls++
 	p.mu.Unlock()
 	switch {
-	case strings.EqualFold(user, "alice") || user == "alice@corp":
-		if password == "pw-a" {
-			return user, nil
+	case user == "alice" && password == "pw-a", user == "bob" && password == "pw-b", user == "renamed" && password == "pw-r":
+		if user == "renamed" {
+			return "bob", nil // a module mapping the name to another account
 		}
-	case user == "bob" && password == "pw-b", user == "noacct" && password == "pw-n":
 		return user, nil
 	case user == "disabled" && password == "pw-d":
 		return "", pam.ErrAccount
@@ -57,11 +57,19 @@ func (p *fakePAM) Check(_ context.Context, user, password string) (string, error
 // accounts canonicalises like SSSD with case_sensitive = false and a domain suffix.
 func accounts(name string) (account.Account, error) {
 	var a account.Account
-	switch strings.ToLower(strings.TrimSuffix(name, "@corp")) {
+	n := strings.ToLower(name)
+	n = strings.TrimPrefix(strings.TrimSuffix(strings.TrimSuffix(n, "@corp.example.com"), "@corp"), `corp\`)
+	switch n {
 	case "alice":
 		a.Name, a.UID = "alice", 1001
 	case "bob":
 		a.Name, a.UID = "bob", 1002
+	case "disabled", "down", "renamed":
+		a.Name, a.UID = n, 1003
+	case "refused":
+		return a, fmt.Errorf("%w: refused (account ID 999)", account.ErrRefused)
+	case "nss-down":
+		return a, errors.New("sssd: timed out")
 	default:
 		return a, account.ErrNoAccount
 	}
@@ -462,7 +470,9 @@ func TestFailedSignIns(t *testing.T) {
 		{"alice", "wrong-zz9", 401, "Wrong user name or password."},
 		{"nobody", "pw-a", 401, "Wrong user name or password."},
 		{"disabled", "pw-d", 401, "Wrong user name or password."}, // same words: no hint the password was right
-		{"noacct", "pw-n", 403, "This account can&#39;t use Atelier."},
+		{"refused", "pw-n", 401, "Wrong user name or password."},  // no hint the account exists (d57d7bd-N1)
+		{"renamed", "pw-r", 401, "Wrong user name or password."},  // PAM's user is another account
+		{"nss-down", "x-zz9", 503, "Sign-in is unavailable"},
 		{"down", "pw-down-zz9", 503, "Sign-in is unavailable"},
 		{"alice", "", 401, "Enter your user name and password."},
 	} {
@@ -529,6 +539,39 @@ func TestRateLimits(t *testing.T) {
 	}
 	if w := other.signIn("bob", "pw-b"); w.Code != http.StatusSeeOther {
 		t.Errorf("bob's attempts were used up by the address refusal: %d", w.Code)
+	}
+}
+
+// Every spelling of one account shares one set of tries (atelier-d57d7bd-F1): the
+// reviewer's probe, ten wrong passwords for each spelling from one address.
+func TestSpellingsShareOneLimit(t *testing.T) {
+	e := newEnv(t)
+	b := e.browser()
+	for _, spelling := range []string{"alice", "ALICE", "alice@corp", "alice@corp.example.com", `CORP\alice`, "alice@CORP.EXAMPLE.COM"} {
+		for range 10 {
+			b.signIn(spelling, "wrong")
+		}
+	}
+	if e.pam.calls > nameTries {
+		t.Fatalf("%d wrong passwords reached PAM for one account, want at most %d", e.pam.calls, nameTries)
+	}
+}
+
+// A name without a usable account never reaches PAM, and NSS failing isn't counted.
+func TestNoAccountNeverReachesPAM(t *testing.T) {
+	e := newEnv(t)
+	b := e.browser()
+	for _, u := range []string{"nobody", "refused", "nss-down"} {
+		b.signIn(u, "pw-a")
+	}
+	if e.pam.calls != 0 {
+		t.Errorf("PAM called %d times", e.pam.calls)
+	}
+	for range 3 * addrTries {
+		b.signIn("nss-down", "x")
+	}
+	if w := b.signIn("alice", "pw-a"); w.Code != http.StatusSeeOther {
+		t.Errorf("NSS failures used up the address's tries: %d", w.Code)
 	}
 }
 

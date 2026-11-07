@@ -256,40 +256,62 @@ func (f *Front) signIn(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusUnauthorized, "Enter your user name and password.")
 		return
 	}
-	nameKey, addrKey := "name:"+strings.ToLower(user), "addr:"+clientAddr(r)
-	if ok, _ := f.names.Try(nameKey); !ok {
-		f.o.Logger.Warn("sign-in refused: too many attempts for this name", "user", user, "addr", clientAddr(r))
-		fail(http.StatusTooManyRequests, "Too many attempts for this user name. Wait a few minutes, then try again.")
-		return
-	}
+	// The address first, so it bounds the account lookups too.
+	addrKey := "addr:" + clientAddr(r)
 	if ok, _ := f.addrs.Try(addrKey); !ok {
-		f.names.Refund(nameKey) // this attempt never reached a password check
 		f.o.Logger.Warn("sign-in refused: too many attempts from this address", "addr", clientAddr(r))
 		fail(http.StatusTooManyRequests, "Too many sign-in attempts from here. Wait a few minutes, then try again.")
+		return
+	}
+	// Resolve the typed name to its account before any password check (no password is
+	// needed for that). The name limit is keyed on the canonical name, so every
+	// spelling SSSD maps to one AD account (alice, ALICE, alice@corp.example.com,
+	// CORP\alice) shares one set of tries (atelier-d57d7bd-F1). A name without a usable
+	// account never reaches PAM and gets the same answer as a wrong password
+	// (atelier-d57d7bd-N1).
+	pre, err := f.o.Accounts(user)
+	switch {
+	case err == nil:
+	case errors.Is(err, account.ErrNoAccount), errors.Is(err, account.ErrRefused):
+		f.o.Logger.Info("sign-in failed: no usable account", "user", user, "addr", clientAddr(r), "why", err)
+		fail(http.StatusUnauthorized, "Wrong user name or password.")
+		return
+	default: // NSS (SSSD) didn't answer
+		f.addrs.Refund(addrKey)
+		f.o.Logger.Error("sign-in could not look up the account", "user", user, "err", err)
+		fail(http.StatusServiceUnavailable, "Sign-in is unavailable right now. Try again in a minute.")
+		return
+	}
+	nameKey := "name:" + pre.Name
+	if ok, _ := f.names.Try(nameKey); !ok {
+		f.addrs.Refund(addrKey) // this attempt never reached a password check
+		f.o.Logger.Warn("sign-in refused: too many attempts for this account", "user", pre.Name, "addr", clientAddr(r))
+		fail(http.StatusTooManyRequests, "Too many attempts for this user name. Wait a few minutes, then try again.")
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), checkTimeout)
 	defer cancel()
-	pamUser, err := f.o.Password.Check(ctx, user, password)
+	pamUser, err := f.o.Password.Check(ctx, pre.Name, password)
 	switch {
 	case err == nil:
 	case errors.Is(err, pam.ErrAuth), errors.Is(err, pam.ErrAccount):
-		f.o.Logger.Info("sign-in failed", "user", user, "addr", clientAddr(r), "why", err)
+		f.o.Logger.Info("sign-in failed", "user", pre.Name, "addr", clientAddr(r), "why", err)
 		fail(http.StatusUnauthorized, "Wrong user name or password.")
 		return
 	default: // the directory is down, too busy, timed out, or misconfigured: not the user's doing
 		f.names.Refund(nameKey)
 		f.addrs.Refund(addrKey)
-		f.o.Logger.Error("sign-in could not check the password", "user", user, "err", err)
+		f.o.Logger.Error("sign-in could not check the password", "user", pre.Name, "err", err)
 		fail(http.StatusServiceUnavailable, "Sign-in is unavailable right now. Try again in a minute.")
 		return
 	}
 
+	// PAM may hand back another name; it must still be the same account.
 	acct, err := f.o.Accounts(pamUser)
-	if err != nil {
-		f.o.Logger.Warn("sign-in: password right but no usable account", "user", pamUser, "err", err)
-		fail(http.StatusForbidden, "This account can't use Atelier. Ask your administrator.")
+	if err != nil || acct.Name != pre.Name {
+		f.o.Logger.Error("sign-in: PAM's user isn't the account looked up", "typed", user, "account", pre.Name, "pam", pamUser, "err", err)
+		fail(http.StatusUnauthorized, "Wrong user name or password.")
 		return
 	}
 	f.names.Reset(nameKey)
