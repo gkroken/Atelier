@@ -7,11 +7,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gkroken/Atelier/internal/backend"
+	"github.com/gkroken/Atelier/internal/ide"
 	"github.com/gkroken/Atelier/internal/launcher"
 )
 
@@ -177,5 +179,47 @@ func TestTokenURLSetsCookieAndDropsToken(t *testing.T) {
 	do(h, "POST", "/start", "127.0.0.1:18080", map[string]string{"Cookie": cookieName + "=" + testToken, "Sec-Fetch-Site": "same-origin"})
 	if be.creates != 1 {
 		t.Errorf("creates = %d, want 1", be.creates)
+	}
+}
+
+// runningBackend "runs" every container on 127.0.0.1, where the test's IDE listens.
+type runningBackend struct{ countingBackend }
+
+func (r *runningBackend) Create(context.Context, backend.Spec) (string, error) { return "c1", nil }
+func (r *runningBackend) Inspect(context.Context, string) (backend.State, error) {
+	return backend.State{Running: true, IP: "127.0.0.1"}, nil
+}
+
+// The spike's token cookie never reaches an IDE: code running in a session could
+// otherwise read it and hand it to another local account (atelier-26b4860-N1).
+func TestTokenCookieNeverReachesTheIDE(t *testing.T) {
+	var gotCookies []string
+	ideSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCookies = append(gotCookies, strings.Join(r.Header.Values("Cookie"), "; "))
+	}))
+	defer ideSrv.Close()
+	_, portStr, _ := strings.Cut(strings.TrimPrefix(ideSrv.URL, "http://"), ":")
+	port, _ := strconv.Atoi(portStr)
+
+	acct := launcher.Account{Name: "alice", UID: 4321, GID: 4321, Home: "/home/alice"}
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	l := launcher.New(&runningBackend{}, func(*http.Request) (string, bool) { return acct.Name, true }, launcher.Options{Logger: quiet})
+	s, err := l.Start(context.Background(), acct, ide.Definition{
+		Name: "fake", Title: "Fake", Image: "fake:1", Port: port, Cmd: []string{"x"},
+		StripPrefix: true, Health: ide.Health{Path: "/", MaxStatus: 399},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newHandler(l, acct, testToken, "18080", quiet)
+	gotCookies = nil // drop the health checks
+	w := do(h, "GET", "/s/"+s.ID+"/", "127.0.0.1:18080", map[string]string{
+		"Cookie": cookieName + "=" + testToken + "; ide-cookie=1",
+	})
+	if w.Code != 200 || len(gotCookies) != 1 {
+		t.Fatalf("status %d, IDE requests %d", w.Code, len(gotCookies))
+	}
+	if strings.Contains(gotCookies[0], cookieName) || strings.Contains(gotCookies[0], testToken) || gotCookies[0] != "ide-cookie=1" {
+		t.Errorf("IDE received Cookie %q", gotCookies[0])
 	}
 }
