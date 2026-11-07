@@ -55,7 +55,7 @@
         "dev": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Development only: sign in as the account running Atelier with the password atelier-dev. Needs a loopback server.listen; not with pam.",
+          "description": "Development only: sign in as the account running Atelier with the password Atelier prints at startup. Needs a loopback server.listen; not with pam.",
           "properties": {}
         }
       }

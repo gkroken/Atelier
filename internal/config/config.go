@@ -63,7 +63,7 @@ type Auth struct {
 	PAM  *PAM  `json:"pam,omitempty"`
 	OIDC *OIDC `json:"oidc,omitempty"`
 	// Dev is development-only sign-in: the account running Atelier, with the password
-	// "atelier-dev" (internal/auth/devauth). Only with a loopback server.listen, and
+	// printed at startup (internal/auth/devauth). Only with a loopback server.listen, and
 	// not together with pam.
 	Dev *Dev `json:"dev,omitempty"`
 }

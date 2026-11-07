@@ -151,8 +151,11 @@ func passwordChecker(cfg *config.Config, me string, log *slog.Logger) (web.Check
 	}
 	switch {
 	case cfg.Auth.Dev != nil:
-		log.Warn("DEVELOPMENT SIGN-IN IS ON: " + me + " signs in with the password " + devauth.Password + "; never use auth.dev on a server")
-		return devauth.Checker{User: me}, nil
+		c := devauth.New(me)
+		log.Warn("development sign-in is on; never use auth.dev on a server", "user", me)
+		// To the terminal only, never the log (it may be collected).
+		fmt.Printf("Development sign-in: user %s, password %s (new each start)\n", me, c.Password)
+		return c, nil
 	case cfg.Auth.PAM != nil:
 		return pam.New(cfg.Auth.PAM.Service, "", pamConcurrency)
 	}

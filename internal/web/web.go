@@ -424,7 +424,7 @@ const style = `<style>body{font:16px system-ui,sans-serif;max-width:40em;margin:
 .err{color:#a00}.dev{background:#fe9;padding:.5em}form.inline{display:inline}
 label{display:block;margin:.5em 0}input[type=text],input[type=password]{width:100%;padding:.3em}</style>`
 
-const devBanner = `{{if .Dev}}<p class="dev">Development sign-in is on: the password is atelier-dev.</p>{{end}}`
+const devBanner = `{{if .Dev}}<p class="dev">Development sign-in is on: the password is in the terminal Atelier runs in.</p>{{end}}`
 
 var signinPage = template.Must(template.New("signin").Parse(`<!doctype html><meta charset="utf-8">
 <title>Sign in · Atelier</title>` + style + devBanner + `

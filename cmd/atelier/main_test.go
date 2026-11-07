@@ -60,7 +60,7 @@ func TestListenRule(t *testing.T) {
 func TestPasswordChecker(t *testing.T) {
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	c, err := passwordChecker(load(t, doc("127.0.0.1:8080", "", "  dev: {}")), "gakro", quiet)
-	if dc, ok := c.(devauth.Checker); err != nil || !ok || dc.User != "gakro" {
+	if dc, ok := c.(devauth.Checker); err != nil || !ok || dc.User != "gakro" || len(dc.Password) != 16 {
 		t.Errorf("dev: %T %v", c, err)
 	}
 	oidcOnly := "  oidc: {issuer: https://idp.example.org, clientId: a, clientSecret: \"${S}\"}"

@@ -352,8 +352,10 @@ setuid helper (extra install step and attack surface, not needed with `pam_sss`)
 `msteinert/pam` package (fine, but a dependency for about a hundred lines of cgo).
 
 **Amendment (2026-11-07, spine #2b-ii, user's choice):** a development machine signs in
-with `auth.dev: {}` instead of PAM: only the account running Atelier, with the fixed
-password `atelier-dev` (`internal/auth/devauth`). No sudo, no `/etc/pam.d` file, and no
+with `auth.dev: {}` instead of PAM: only the account running Atelier, with a random
+password made at each start and printed to the terminal, never the log
+(`internal/auth/devauth`; first a fixed `atelier-dev`, changed for atelier-d57d7bd-N2 so
+other accounts on a shared machine can't sign in as you over loopback). No sudo, no `/etc/pam.d` file, and no
 real password on a dev machine. Config refuses it unless `server.listen` is loopback,
 and together with `auth.pam`; Atelier logs a warning and every page says so. Dev uses
 two hosts too (`localhost` and `sessions.localhost`, which browsers resolve to loopback),
