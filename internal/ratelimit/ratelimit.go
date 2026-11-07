@@ -23,7 +23,8 @@ import (
 // 100,000+ names brand-new names wait up to a window, but no name's count is ever lost.
 const maxKeys = 100_000
 
-// prunePause is how long after a prune that freed nothing the next one waits, so a
+// prunePause is how long after a prune that left the map over 99% full the next one
+// waits, so a
 // spray against a full map doesn't scan it on every attempt (atelier-2eead6a-N1).
 const prunePause = time.Second
 
@@ -102,9 +103,10 @@ func (l *Limiter) prune(now time.Time) bool {
 	for k := range l.tries {
 		l.recent(k, now)
 	}
-	if len(l.tries) >= maxKeys {
+	if len(l.tries) >= maxKeys*99/100 {
+		// Little or nothing freed: the map refills at once, so wait before scanning
+		// again (atelier-b2bd82e-N1). Room left now still goes to new keys.
 		l.noPrune = now.Add(prunePause)
-		return false
 	}
-	return true
+	return len(l.tries) < maxKeys
 }

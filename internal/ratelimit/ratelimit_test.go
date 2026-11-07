@@ -197,3 +197,39 @@ func TestFullOfLockedKeysFailsClosed(t *testing.T) {
 		t.Fatal("still refusing new keys after the window")
 	}
 }
+
+// A prune that frees only a few keys also pauses pruning (atelier-b2bd82e-N1): a
+// spray then costs at most one scan per pause, not one per new name.
+func TestNearlyFullPrunePauses(t *testing.T) {
+	l, clock := testLimiter(1, time.Hour)
+	for i := range 5 {
+		l.Try("old-" + strconv.Itoa(i)) // these expire first
+	}
+	*clock = clock.Add(30 * time.Minute)
+	for i := range maxKeys - 5 {
+		l.Try("live-" + strconv.Itoa(i))
+	}
+	*clock = clock.Add(31 * time.Minute) // the old five have expired, the rest are live
+
+	// The prune frees five: the newcomer gets in, and pruning pauses.
+	if ok, _ := l.Try("new-0"); !ok {
+		t.Fatal("newcomer refused though a prune frees room")
+	}
+	if !l.noPrune.After(*clock) {
+		t.Fatal("no pause after a prune that left the map over 99% full")
+	}
+	for i := 1; i < 5; i++ { // the rest of the room, no prune needed
+		if ok, _ := l.Try("new-" + strconv.Itoa(i)); !ok {
+			t.Fatalf("new-%d refused with room left", i)
+		}
+	}
+	// Full again, within the pause: refused without a scan.
+	if ok, _ := l.Try("new-5"); ok {
+		t.Fatal("newcomer let in with a full map")
+	}
+	// A prune that frees plenty doesn't pause.
+	*clock = clock.Add(time.Hour)
+	if ok, _ := l.Try("after"); !ok || l.noPrune.After(*clock) {
+		t.Fatalf("after everything expired: ok=%v, pause until %v", ok, l.noPrune)
+	}
+}
