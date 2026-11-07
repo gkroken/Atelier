@@ -60,11 +60,15 @@ func TestLiveRStudioSessionsKeepSeparateState(t *testing.T) {
 	for _, sid := range ids {
 		start := time.Now()
 		p := Params{SessionID: sid, User: "alice", Home: "/home/alice", Prefix: "/s/" + sid}
+		env, err := d.SessionEnv(p)
+		if err != nil {
+			t.Fatal(err)
+		}
 		cid, err := b.Create(ctx, backend.Spec{
 			Image:      d.Image,
 			Entrypoint: d.Entrypoint,
 			Cmd:        d.Cmd,
-			Env:        d.SessionEnv(p),
+			Env:        env,
 			UID:        uid,
 			GID:        gid,
 			Home:       backend.Mount{Source: home, Target: p.Home},

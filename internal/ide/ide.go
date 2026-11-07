@@ -11,8 +11,11 @@ package ide
 
 import (
 	"fmt"
+	"path"
+	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // Definition describes one IDE.
@@ -62,8 +65,13 @@ type Params struct {
 // SessionEnv returns the full environment for a session: the definition's own entries, then
 // the per-session ones. USER and HOME are set because programs inside look them up
 // (RStudio's auth-none signs in as $USER). Later entries win in Docker, so the
-// per-session values can't be overridden by the definition.
-func (d Definition) SessionEnv(p Params) []string {
+// per-session values can't be overridden by the definition. It refuses Params that
+// don't pass Validate: a definition keys per-session state on these values, and an
+// empty or odd one would quietly put two sessions on the same state.
+func (d Definition) SessionEnv(p Params) ([]string, error) {
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
 	env := append([]string(nil), d.Env...)
 	return append(env,
 		"USER="+p.User,
@@ -73,7 +81,41 @@ func (d Definition) SessionEnv(p Params) []string {
 		"ATELIER_HOME="+p.Home,
 		"ATELIER_PREFIX="+p.Prefix,
 		"ATELIER_PORT="+strconv.Itoa(d.Port),
-	)
+	), nil
+}
+
+var (
+	// sessionIDRE: lowercase letters and digits only, so the ID is safe as one path
+	// segment (no "/", "..", or empty). Atelier's own IDs are 26 base32 characters.
+	sessionIDRE = regexp.MustCompile(`^[a-z0-9]{8,64}$`)
+	// userRE: POSIX portable user-name characters plus "@" (SSSD fully qualified names).
+	// No ":" or newline, so the name is safe in a passwd line, and no "/".
+	userRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._@-]{0,63}$`)
+	// prefixRE: one or more "/segment", no trailing slash.
+	prefixRE = regexp.MustCompile(`^(/[A-Za-z0-9._-]+)+$`)
+)
+
+// Validate checks every field. Each one ends up in an environment variable that a
+// definition may use in a path, so each must be present and unable to escape.
+func (p Params) Validate() error {
+	if !sessionIDRE.MatchString(p.SessionID) {
+		return fmt.Errorf("session ID %q: want 8-64 lowercase letters or digits", p.SessionID)
+	}
+	if !userRE.MatchString(p.User) {
+		return fmt.Errorf("user name %q not allowed", p.User)
+	}
+	if !path.IsAbs(p.Home) || path.Clean(p.Home) != p.Home || p.Home == "/" {
+		return fmt.Errorf("home %q: want an absolute, clean path below /", p.Home)
+	}
+	if !prefixRE.MatchString(p.Prefix) {
+		return fmt.Errorf("prefix %q: want /segment[/segment...] with no trailing slash", p.Prefix)
+	}
+	for _, seg := range strings.Split(p.Prefix[1:], "/") {
+		if seg == "." || seg == ".." {
+			return fmt.Errorf("prefix %q has a %q segment", p.Prefix, seg)
+		}
+	}
+	return nil
 }
 
 var registry = map[string]Definition{}

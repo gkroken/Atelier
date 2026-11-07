@@ -22,6 +22,8 @@ package ide
 //     (atelier-10f7686-F1). Each session gets its own data folder, keyed by the session
 //     ID. User settings in ~/.config/rstudio stay shared, as on Workbench. Removing a
 //     session's folder when it is quit belongs to the session lifecycle (spine #4/#5).
+//     SessionEnv refuses an empty or path-unsafe ID, and the script also stops on an
+//     empty one rather than fall back to a shared folder (atelier-9a20127-F1).
 //   - --www-address=0.0.0.0: the proxy reaches the container by its bridge IP.
 //   - Health: rserver answers 302 (to its sign-in or main page) as soon as it is up.
 //     The R session itself (rsession) starts on the first page load, about 2 s later on
@@ -33,6 +35,7 @@ var RStudio = Definition{
 	Port:       8787,
 	Entrypoint: []string{"/bin/sh", "-c"},
 	Cmd: []string{`set -eu
+: "${ATELIER_SESSION_ID:?}" "${ATELIER_USER:?}" "${ATELIER_HOME:?}" "${ATELIER_PREFIX:?}" "${ATELIER_PORT:?}"
 mkdir -p /tmp/rstudio/db /tmp/rstudio/run
 printf 'provider=sqlite\ndirectory=/tmp/rstudio/db\n' > /tmp/rstudio/database.conf
 export RSTUDIO_DATA_HOME="$ATELIER_HOME/.local/share/rstudio/atelier/$ATELIER_SESSION_ID"
